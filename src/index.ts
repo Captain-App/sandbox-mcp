@@ -2,6 +2,9 @@
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 
+// Export Sandbox class from @cloudflare/sandbox (required for containers)
+export { Sandbox } from "@cloudflare/sandbox";
+
 // Export Durable Object and Workflow classes
 export { OpenCodeMcpAgent };
 export { ExecuteTaskWorkflow };

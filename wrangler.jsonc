@@ -2,38 +2,45 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "sandbox-mcp",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-12-21",
+	"compatibility_date": "2025-05-06",
 	"compatibility_flags": ["nodejs_compat"],
 
 	"observability": {
 		"enabled": true
 	},
 
-	// Durable Objects - our MCP Agent
+	// Container configuration for Sandbox
+	// The Dockerfile extends cloudflare/sandbox with OpenCode installed
+	"containers": [
+		{
+			"class_name": "Sandbox",
+			"image": "./Dockerfile",
+			"instance_type": "standard-2",
+			"max_instances": 10
+		}
+	],
+
+	// Durable Objects
 	"durable_objects": {
 		"bindings": [
 			{
 				"name": "MCP_AGENT",
 				"class_name": "OpenCodeMcpAgent"
+			},
+			{
+				"name": "Sandbox",
+				"class_name": "Sandbox"
 			}
 		]
 	},
 
-	// SQLite storage for the DO
+	// SQLite storage for DOs
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["OpenCodeMcpAgent"]
+			"new_sqlite_classes": ["OpenCodeMcpAgent", "Sandbox"]
 		}
 	],
-
-	// Sandbox binding - connects to Cloudflare Sandbox infrastructure
-	// This requires the sandbox product to be enabled on the account
-	"containers": {
-		"SANDBOX": {
-			"image": "@cloudflare/sandbox:opencode"
-		}
-	},
 
 	// R2 bucket for session persistence (workspace files + OpenCode state)
 	"r2_buckets": [
@@ -53,8 +60,7 @@
 	],
 
 	// Environment variables
-	// Secrets (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, ANTHROPIC_API_KEY) 
-	// should be set via wrangler secret put
+	// Secrets (R2 creds, ANTHROPIC_API_KEY, GITHUB_TOKEN) via wrangler secret put
 	"vars": {
 		"ENVIRONMENT": "development"
 	}

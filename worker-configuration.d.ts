@@ -13,7 +13,7 @@ declare global {
 
 		// Sandbox binding - Cloudflare Containers/Sandbox infrastructure
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		SANDBOX: DurableObjectNamespace<Sandbox<any>>;
+		Sandbox: DurableObjectNamespace<Sandbox<any>>;
 
 		// R2 bucket for session persistence
 		SESSIONS_BUCKET: R2Bucket;

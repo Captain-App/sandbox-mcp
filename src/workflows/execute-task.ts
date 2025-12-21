@@ -153,7 +153,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
    * Get a sandbox instance from the SANDBOX binding
    */
   private getSandbox(sandboxId: string): Sandbox<unknown> {
-    return getSandbox(this.env.SANDBOX, sandboxId, {
+    return getSandbox(this.env.Sandbox, sandboxId, {
       normalizeId: true,
       sleepAfter: "10 minutes",
     });
