@@ -4,12 +4,10 @@ import { RunRecord } from "../models/run";
 import { StorageReadError, StorageWriteError } from "../models/errors";
 
 /**
- * SQL executor type (from Durable Object)
+ * SQL storage type - use SqlStorage from workers types at runtime,
+ * but define a minimal interface for testing
  */
-export type SqlExecutor = <T = unknown>(
-	strings: TemplateStringsArray,
-	...values: unknown[]
-) => { results: T[]; changes: number };
+export type SqlStorageInterface = SqlStorage;
 
 /**
  * Storage service interface
@@ -38,19 +36,20 @@ export interface StorageServiceInterface {
 /**
  * Create storage service from SQL executor
  */
-export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface => ({
+export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInterface => ({
 	getSession: (sessionId) =>
 		Effect.try({
 			try: () => {
-				const result = sql<{ key: string; data: string }>`
-					SELECT key, data FROM sessions WHERE key = ${sessionId}
-				`;
-				if (result.results.length === 0) {
+				const result = sql
+					.exec<{ key: string; data: string }>(
+						"SELECT key, data FROM sessions WHERE key = ?",
+						sessionId,
+					)
+					.toArray();
+				if (result.length === 0) {
 					return Option.none();
 				}
-				const parsed = Schema.decodeUnknownSync(SessionMetadata)(
-					JSON.parse(result.results[0].data),
-				);
+				const parsed = Schema.decodeUnknownSync(SessionMetadata)(JSON.parse(result[0].data));
 				return Option.some(parsed);
 			},
 			catch: (error) =>
@@ -64,10 +63,12 @@ export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface =>
 		Effect.try({
 			try: () => {
 				const data = JSON.stringify(session);
-				sql`
-					INSERT OR REPLACE INTO sessions (key, data, updated_at)
-					VALUES (${session.sessionId}, ${data}, ${Date.now()})
-				`;
+				sql.exec(
+					"INSERT OR REPLACE INTO sessions (key, data, updated_at) VALUES (?, ?, ?)",
+					session.sessionId,
+					data,
+					Date.now(),
+				);
 			},
 			catch: (error) =>
 				new StorageWriteError({
@@ -79,7 +80,7 @@ export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface =>
 	deleteSession: (sessionId) =>
 		Effect.try({
 			try: () => {
-				sql`DELETE FROM sessions WHERE key = ${sessionId}`;
+				sql.exec("DELETE FROM sessions WHERE key = ?", sessionId);
 			},
 			catch: (error) =>
 				new StorageWriteError({
@@ -91,13 +92,13 @@ export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface =>
 	getRun: (runId) =>
 		Effect.try({
 			try: () => {
-				const result = sql<{ key: string; data: string }>`
-					SELECT key, data FROM runs WHERE key = ${runId}
-				`;
-				if (result.results.length === 0) {
+				const result = sql
+					.exec<{ key: string; data: string }>("SELECT key, data FROM runs WHERE key = ?", runId)
+					.toArray();
+				if (result.length === 0) {
 					return Option.none();
 				}
-				const parsed = Schema.decodeUnknownSync(RunRecord)(JSON.parse(result.results[0].data));
+				const parsed = Schema.decodeUnknownSync(RunRecord)(JSON.parse(result[0].data));
 				return Option.some(parsed);
 			},
 			catch: (error) =>
@@ -111,10 +112,13 @@ export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface =>
 		Effect.try({
 			try: () => {
 				const data = JSON.stringify(run);
-				sql`
-					INSERT OR REPLACE INTO runs (key, session_id, data, updated_at)
-					VALUES (${run.runId}, ${run.sessionId}, ${data}, ${Date.now()})
-				`;
+				sql.exec(
+					"INSERT OR REPLACE INTO runs (key, session_id, data, updated_at) VALUES (?, ?, ?, ?)",
+					run.runId,
+					run.sessionId,
+					data,
+					Date.now(),
+				);
 			},
 			catch: (error) =>
 				new StorageWriteError({
@@ -126,15 +130,14 @@ export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface =>
 	listRuns: (sessionId, limit = 10) =>
 		Effect.try({
 			try: () => {
-				const result = sql<{ data: string }>`
-					SELECT data FROM runs 
-					WHERE session_id = ${sessionId}
-					ORDER BY updated_at DESC
-					LIMIT ${limit}
-				`;
-				return result.results.map((row) =>
-					Schema.decodeUnknownSync(RunRecord)(JSON.parse(row.data)),
-				);
+				const result = sql
+					.exec<{ data: string }>(
+						"SELECT data FROM runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT ?",
+						sessionId,
+						limit,
+					)
+					.toArray();
+				return result.map((row) => Schema.decodeUnknownSync(RunRecord)(JSON.parse(row.data)));
 			},
 			catch: (error) =>
 				new StorageReadError({
@@ -146,25 +149,25 @@ export const makeStorageService = (sql: SqlExecutor): StorageServiceInterface =>
 	initSchema: () =>
 		Effect.try({
 			try: () => {
-				sql`
+				sql.exec(`
 					CREATE TABLE IF NOT EXISTS sessions (
 						key TEXT PRIMARY KEY,
 						data TEXT NOT NULL,
 						updated_at INTEGER NOT NULL
 					)
-				`;
-				sql`
+				`);
+				sql.exec(`
 					CREATE TABLE IF NOT EXISTS runs (
 						key TEXT PRIMARY KEY,
 						session_id TEXT NOT NULL,
 						data TEXT NOT NULL,
 						updated_at INTEGER NOT NULL
 					)
-				`;
-				sql`
+				`);
+				sql.exec(`
 					CREATE INDEX IF NOT EXISTS idx_runs_session 
 					ON runs(session_id, updated_at DESC)
-				`;
+				`);
 			},
 			catch: (error) =>
 				new StorageWriteError({
@@ -185,5 +188,5 @@ export class StorageService extends Context.Tag("@sandbox-mcp/StorageService")<
 /**
  * Create storage service layer from SQL executor
  */
-export const makeStorageLayer = (sql: SqlExecutor): Layer.Layer<StorageService> =>
+export const makeStorageLayer = (sql: SqlStorageInterface): Layer.Layer<StorageService> =>
 	Layer.succeed(StorageService, makeStorageService(sql));

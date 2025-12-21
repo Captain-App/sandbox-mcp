@@ -64,9 +64,10 @@ export const getStatusInputSchema = z.object({
 export type GetStatusInput = z.infer<typeof getStatusInputSchema>;
 
 /**
- * MCP tool response type
+ * MCP tool response type - uses index signature for SDK compatibility
  */
 export interface ToolResponse {
+  [key: string]: unknown;
   content: Array<{
     type: "text";
     text: string;
@@ -92,21 +93,20 @@ export const formatErrorResponse = (error: {
   code: string;
   message: string;
   details?: unknown;
-}): ToolResponse => ({
-  content: [
-    {
-      type: "text",
-      text: JSON.stringify(
-        {
-          error: {
-            code: error.code,
-            message: error.message,
-            ...(error.details && { details: error.details }),
-          },
-        },
-        null,
-        2
-      ),
-    },
-  ],
-});
+}): ToolResponse => {
+  const errorObj: Record<string, unknown> = {
+    code: error.code,
+    message: error.message,
+  };
+  if (error.details !== undefined) {
+    errorObj.details = error.details;
+  }
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({ error: errorObj }, null, 2),
+      },
+    ],
+  };
+};
