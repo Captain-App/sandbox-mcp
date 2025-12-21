@@ -25,26 +25,24 @@ export const SessionId = Schema.String.pipe(
 export type SessionId = typeof SessionId.Type;
 
 /**
- * Repository information for cloned repos
+ * Repository information for cloned repos (internal to SessionMetadata)
  */
-export const RepositoryInfo = Schema.Struct({
+const RepositoryInfo = Schema.Struct({
 	url: Schema.String.pipe(
 		Schema.startsWith(GITHUB_URL_PREFIX),
 		Schema.annotations({ description: "GitHub repository URL" }),
 	),
 	branch: Schema.String.pipe(Schema.annotations({ description: "Git branch name" })),
 });
-export type RepositoryInfo = typeof RepositoryInfo.Type;
 
 /**
- * Session configuration
+ * Session configuration (internal to SessionMetadata)
  */
-export const SessionConfig = Schema.Struct({
+const SessionConfig = Schema.Struct({
 	defaultModel: Schema.String.pipe(
 		Schema.annotations({ description: "Default AI model for OpenCode" }),
 	),
 });
-export type SessionConfig = typeof SessionConfig.Type;
 
 /**
  * Complete session metadata stored in DO
@@ -65,26 +63,3 @@ export const SessionMetadata = Schema.Struct({
 });
 export type SessionMetadata = typeof SessionMetadata.Type;
 
-/**
- * Input for creating a new session
- */
-export const CreateSessionInput = Schema.Struct({
-	sessionId: Schema.optional(SessionId),
-	repositoryUrl: Schema.optional(Schema.String.pipe(Schema.startsWith("https://github.com/"))),
-	branch: Schema.optional(Schema.String),
-	title: Schema.optional(Schema.String),
-});
-export type CreateSessionInput = typeof CreateSessionInput.Type;
-
-/**
- * Output from session creation
- */
-export const CreateSessionOutput = Schema.Struct({
-	sessionId: Schema.String,
-	sandboxId: Schema.String,
-	webUiUrl: Schema.String,
-	status: Schema.Literal("created", "resumed"),
-	workspacePath: Schema.String,
-	repository: Schema.optional(RepositoryInfo),
-});
-export type CreateSessionOutput = typeof CreateSessionOutput.Type;

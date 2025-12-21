@@ -22,7 +22,6 @@ import {
 import {
   isSessionError,
   isStorageError,
-  isWorkflowError,
 } from "../models/errors";
 import type { SessionMetadata } from "../models/session";
 import type { RunRecord } from "../models/run";
@@ -84,12 +83,6 @@ function formatDomainError(
     });
   }
   if (isStorageError(error)) {
-    return formatErrorResponse({
-      code: error._tag,
-      message: error.message,
-    });
-  }
-  if (isWorkflowError(error)) {
     return formatErrorResponse({
       code: error._tag,
       message: error.message,

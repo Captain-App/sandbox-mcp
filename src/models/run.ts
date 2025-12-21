@@ -6,12 +6,6 @@ import { Schema } from "effect";
 export const TASK_MAX_LENGTH = 50000;
 
 /**
- * Run ID - branded for type safety
- */
-export const RunId = Schema.String.pipe(Schema.brand("RunId"));
-export type RunId = typeof RunId.Type;
-
-/**
  * Valid run status values
  */
 export const RunStatus = Schema.Literal("queued", "running", "completed", "failed", "retrying");
@@ -48,34 +42,3 @@ export const RunRecord = Schema.Struct({
 	maxRetries: Schema.Number,
 });
 export type RunRecord = typeof RunRecord.Type;
-
-/**
- * Input for running a task
- */
-export const RunTaskInput = Schema.Struct({
-	sessionId: Schema.String,
-	task: Schema.String.pipe(Schema.maxLength(TASK_MAX_LENGTH)),
-	model: Schema.optional(Schema.String),
-});
-export type RunTaskInput = typeof RunTaskInput.Type;
-
-/**
- * Output from task initiation
- */
-export const RunTaskOutput = Schema.Struct({
-	runId: Schema.String,
-	status: Schema.Literal("started"),
-	webUiUrl: Schema.String,
-	message: Schema.String,
-});
-export type RunTaskOutput = typeof RunTaskOutput.Type;
-
-/**
- * Input for status check
- */
-export const GetStatusInput = Schema.Struct({
-	sessionId: Schema.String,
-	runId: Schema.optional(Schema.String),
-	includeGitStatus: Schema.optional(Schema.Boolean),
-});
-export type GetStatusInput = typeof GetStatusInput.Type;

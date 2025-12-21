@@ -5,9 +5,6 @@ import * as Predicate from "effect/Predicate";
 export const SessionErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/SessionError");
 export type SessionErrorTypeId = typeof SessionErrorTypeId;
 
-export const WorkflowErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/WorkflowError");
-export type WorkflowErrorTypeId = typeof WorkflowErrorTypeId;
-
 export const StorageErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/StorageError");
 export type StorageErrorTypeId = typeof StorageErrorTypeId;
 
@@ -28,28 +25,6 @@ export type SessionError = SessionNotFoundError;
 
 export const isSessionError = (u: unknown): u is SessionError =>
 	Predicate.hasProperty(u, SessionErrorTypeId);
-
-// --- Workflow Errors ---
-
-export class WorkflowExecutionError extends Schema.TaggedError<WorkflowExecutionError>()(
-	"WorkflowExecutionError",
-	{
-		runId: Schema.String,
-		step: Schema.String,
-		cause: Schema.String,
-	},
-) {
-	readonly [WorkflowErrorTypeId]: WorkflowErrorTypeId = WorkflowErrorTypeId;
-
-	override get message(): string {
-		return `Workflow step "${this.step}" failed for run "${this.runId}": ${this.cause}`;
-	}
-}
-
-export type WorkflowError = WorkflowExecutionError;
-
-export const isWorkflowError = (u: unknown): u is WorkflowError =>
-	Predicate.hasProperty(u, WorkflowErrorTypeId);
 
 // --- Storage Errors ---
 

@@ -10,7 +10,8 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"lint": "oxlint",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"knip": "knip"
 	},
 	"dependencies": {
 		"@cloudflare/sandbox": "^0.6.7",
@@ -21,10 +22,11 @@
 		"zod": "^3.24.0"
 	},
 	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.11.1",
 		"@cloudflare/workers-types": "^4.20241218.0",
+		"@types/node": "^25.0.3",
+		"knip": "^5.76.2",
 		"oxlint": "^0.16.0",
-		"typescript": "^5.7.2",
+		"typescript": "^5.9.3",
 		"vitest": "^2.1.8",
 		"wrangler": "^3.99.0"
 	}
