@@ -240,3 +240,54 @@ export type StorageError = StorageReadError | StorageWriteError;
 
 export const isStorageError = (u: unknown): u is StorageError =>
 	Predicate.hasProperty(u, StorageErrorTypeId);
+
+// --- Backup Errors ---
+
+export const BackupErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/BackupError");
+export type BackupErrorTypeId = typeof BackupErrorTypeId;
+
+export class BackupCreationError extends Schema.TaggedError<BackupCreationError>()(
+	"BackupCreationError",
+	{
+		sessionId: Schema.String,
+		phase: Schema.String,
+		cause: Schema.String,
+	},
+) {
+	readonly [BackupErrorTypeId]: BackupErrorTypeId = BackupErrorTypeId;
+
+	override get message(): string {
+		return `Backup failed for session "${this.sessionId}" during ${this.phase}: ${this.cause}`;
+	}
+}
+
+export class BackupRestoreError extends Schema.TaggedError<BackupRestoreError>()(
+	"BackupRestoreError",
+	{
+		sessionId: Schema.String,
+		phase: Schema.String,
+		cause: Schema.String,
+	},
+) {
+	readonly [BackupErrorTypeId]: BackupErrorTypeId = BackupErrorTypeId;
+
+	override get message(): string {
+		return `Restore failed for session "${this.sessionId}" during ${this.phase}: ${this.cause}`;
+	}
+}
+
+export class BackupNotFoundError extends Schema.TaggedError<BackupNotFoundError>()(
+	"BackupNotFoundError",
+	{ sessionId: Schema.String },
+) {
+	readonly [BackupErrorTypeId]: BackupErrorTypeId = BackupErrorTypeId;
+
+	override get message(): string {
+		return `No backup found for session "${this.sessionId}"`;
+	}
+}
+
+export type BackupError = BackupCreationError | BackupRestoreError | BackupNotFoundError;
+
+export const isBackupError = (u: unknown): u is BackupError =>
+	Predicate.hasProperty(u, BackupErrorTypeId);

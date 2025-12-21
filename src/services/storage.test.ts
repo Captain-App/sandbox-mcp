@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import { makeStorageService } from "./storage";
-import type { SessionMetadata } from "../models/session";
+import type { SessionMetadata, SessionId } from "../models/session";
 
 // Mock SQL storage for testing - matches SqlStorage interface
 const createMockSql = () => {
@@ -92,7 +92,8 @@ describe("StorageService", () => {
 		const service = makeStorageService(mockSql as any);
 
 		const session: SessionMetadata = {
-			sessionId: "test-session",
+			// Cast to branded type for tests - in production, values come from validated input
+			sessionId: "test-session" as SessionId,
 			sandboxId: "test-session",
 			createdAt: Date.now(),
 			lastActivity: Date.now(),
@@ -142,7 +143,8 @@ describe("StorageService", () => {
 		const service = makeStorageService(mockSql as any);
 
 		const session: SessionMetadata = {
-			sessionId: "to-delete",
+			// Cast to branded type for tests - in production, values come from validated input
+			sessionId: "to-delete" as SessionId,
 			sandboxId: "to-delete",
 			createdAt: Date.now(),
 			lastActivity: Date.now(),

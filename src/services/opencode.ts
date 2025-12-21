@@ -102,43 +102,59 @@ export interface OpenCodeServiceInterface {
  */
 export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
   startOpencode: (sandbox, options = {}) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { client, server } = await createOpencode<OpencodeClient>(
-          sandbox,
-          {
+    Effect.gen(function* () {
+      yield* Effect.log("Starting OpenCode server with SDK client");
+      
+      const result = yield* Effect.tryPromise({
+        try: async () => {
+          const { client, server } = await createOpencode<OpencodeClient>(
+            sandbox,
+            {
+              port: options.port ?? 4096,
+              directory: options.directory ?? "/workspace",
+              config: options.config,
+            }
+          );
+          return { client, server };
+        },
+        catch: (error) =>
+          new OpenCodeStartupError({
+            cause: String(error),
+          }),
+      });
+
+      yield* Effect.log("OpenCode server started successfully");
+      return result;
+    }).pipe(Effect.withLogSpan("startOpencode")),
+
+  startServer: (sandbox, options = {}) =>
+    Effect.gen(function* () {
+      yield* Effect.log("Starting OpenCode server (no SDK client)");
+      
+      const server = yield* Effect.tryPromise({
+        try: async () => {
+          return await createOpencodeServer(sandbox, {
             port: options.port ?? 4096,
             directory: options.directory ?? "/workspace",
             config: options.config,
-          }
-        );
+          });
+        },
+        catch: (error) =>
+          new OpenCodeStartupError({
+            cause: String(error),
+          }),
+      });
 
-        return { client, server };
-      },
-      catch: (error) =>
-        new OpenCodeStartupError({
-          cause: String(error),
-        }),
-    }),
-
-  startServer: (sandbox, options = {}) =>
-    Effect.tryPromise({
-      try: async () => {
-        return await createOpencodeServer(sandbox, {
-          port: options.port ?? 4096,
-          directory: options.directory ?? "/workspace",
-          config: options.config,
-        });
-      },
-      catch: (error) =>
-        new OpenCodeStartupError({
-          cause: String(error),
-        }),
-    }),
+      yield* Effect.log("OpenCode server started successfully");
+      return server;
+    }).pipe(Effect.withLogSpan("startServer")),
 
   executeTask: (instance, params) =>
     Effect.gen(function* () {
       const { client } = instance;
+
+      yield* Effect.log(`Executing task for session ${params.sessionId}`);
+      yield* Effect.logDebug(`Task: ${params.task.slice(0, 100)}...`);
 
       // Create or get session
       const sessionData = yield* Effect.tryPromise({
@@ -163,6 +179,8 @@ export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
             cause: `Failed to create/get session: ${error}`,
           }),
       });
+
+      yield* Effect.log(`Using OpenCode session: ${sessionData.data.id}`);
 
       // Execute task with timeout
       const response = yield* Effect.tryPromise({
@@ -196,12 +214,20 @@ export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
               timeoutMinutes: 50,
             })
           )
+        ),
+        Effect.tapError((error) =>
+          Effect.log(`Task execution failed: ${error.message}`)
         )
       );
 
+      yield* Effect.log("Task execution completed successfully");
+      
       // Parse response
       return parseOpenCodeResponse(response);
-    }),
+    }).pipe(
+      Effect.withLogSpan("executeTask"),
+      Effect.annotateLogs({ sessionId: params.sessionId, model: params.model })
+    ),
 
   proxyWebUI: (request, sandbox, server) =>
     Effect.tryPromise({

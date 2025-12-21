@@ -1,10 +1,21 @@
 // src/agent/tools.ts
 import { z } from "zod";
+import {
+  SESSION_ID_PATTERN,
+  SESSION_ID_MAX_LENGTH,
+  GITHUB_URL_PREFIX,
+} from "../models/session";
+import { TASK_MAX_LENGTH } from "../models/run";
 
 /**
- * Session ID validation pattern (lowercase alphanumeric + hyphens)
+ * MCP tool schemas using Zod (required by MCP SDK)
+ *
+ * Note: We use Zod here because the MCP SDK's server.tool() method
+ * only accepts Zod schemas (ZodRawShapeCompat). The canonical domain
+ * models use Effect Schema in ../models/ for consistency with Effect
+ * patterns. Shared validation constants are exported from the models
+ * to keep the rules in sync.
  */
-const sessionIdPattern = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
 
 /**
  * Schema for opencode_create_session tool input
@@ -13,16 +24,16 @@ export const createSessionInputSchema = z.object({
   sessionId: z
     .string()
     .regex(
-      sessionIdPattern,
+      SESSION_ID_PATTERN,
       "Session ID must be lowercase alphanumeric with hyphens"
     )
-    .max(64)
+    .max(SESSION_ID_MAX_LENGTH)
     .optional()
     .describe("Unique session identifier. Auto-generated if not provided."),
 
   repositoryUrl: z
     .string()
-    .startsWith("https://github.com/")
+    .startsWith(GITHUB_URL_PREFIX)
     .optional()
     .describe("GitHub repository URL to clone"),
 
@@ -44,7 +55,7 @@ export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 export const runTaskInputSchema = z.object({
   sessionId: z.string().describe("Session ID from opencode_create_session"),
 
-  task: z.string().max(50000).describe("Natural language task description"),
+  task: z.string().max(TASK_MAX_LENGTH).describe("Natural language task description"),
 
   model: z
     .string()

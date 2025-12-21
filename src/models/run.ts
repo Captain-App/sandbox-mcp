@@ -1,6 +1,17 @@
 import { Schema } from "effect";
 
 /**
+ * Shared validation constants
+ */
+export const TASK_MAX_LENGTH = 50000;
+
+/**
+ * Run ID - branded for type safety
+ */
+export const RunId = Schema.String.pipe(Schema.brand("RunId"));
+export type RunId = typeof RunId.Type;
+
+/**
  * Valid run status values
  */
 export const RunStatus = Schema.Literal("queued", "running", "completed", "failed", "retrying");
@@ -24,7 +35,7 @@ export type RunResult = typeof RunResult.Type;
  * Complete run record stored in DO
  */
 export const RunRecord = Schema.Struct({
-	runId: Schema.String,
+	runId: Schema.String, // Note: Stored as string in DB, branded type used for new IDs
 	sessionId: Schema.String,
 	workflowId: Schema.String,
 	status: RunStatus,
@@ -43,7 +54,7 @@ export type RunRecord = typeof RunRecord.Type;
  */
 export const RunTaskInput = Schema.Struct({
 	sessionId: Schema.String,
-	task: Schema.String.pipe(Schema.maxLength(50000)),
+	task: Schema.String.pipe(Schema.maxLength(TASK_MAX_LENGTH)),
 	model: Schema.optional(Schema.String),
 });
 export type RunTaskInput = typeof RunTaskInput.Type;

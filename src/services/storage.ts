@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Layer, Option, Schema, ParseResult } from "effect";
 import { SessionMetadata } from "../models/session";
 import { RunRecord } from "../models/run";
 import { StorageReadError, StorageWriteError } from "../models/errors";
@@ -34,29 +34,60 @@ export interface StorageServiceInterface {
 }
 
 /**
+ * Helper to format parse errors for storage error messages
+ */
+const formatParseError = (error: ParseResult.ParseError): string => {
+	return ParseResult.TreeFormatter.formatErrorSync(error);
+};
+
+/**
  * Create storage service from SQL executor
  */
 export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInterface => ({
 	getSession: (sessionId) =>
-		Effect.try({
-			try: () => {
-				const result = sql
-					.exec<{ key: string; data: string }>(
-						"SELECT key, data FROM sessions WHERE key = ?",
-						sessionId,
-					)
-					.toArray();
-				if (result.length === 0) {
-					return Option.none();
-				}
-				const parsed = Schema.decodeUnknownSync(SessionMetadata)(JSON.parse(result[0].data));
-				return Option.some(parsed);
-			},
-			catch: (error) =>
-				new StorageReadError({
-					key: `session:${sessionId}`,
-					cause: String(error),
-				}),
+		Effect.gen(function* () {
+			// Query the database
+			const result = yield* Effect.try({
+				try: () =>
+					sql
+						.exec<{ key: string; data: string }>(
+							"SELECT key, data FROM sessions WHERE key = ?",
+							sessionId,
+						)
+						.toArray(),
+				catch: (error) =>
+					new StorageReadError({
+						key: `session:${sessionId}`,
+						cause: String(error),
+					}),
+			});
+
+			if (result.length === 0) {
+				return Option.none();
+			}
+
+			// Parse JSON and decode with Effect Schema
+			const jsonData = yield* Effect.try({
+				try: () => JSON.parse(result[0].data) as unknown,
+				catch: (error) =>
+					new StorageReadError({
+						key: `session:${sessionId}`,
+						cause: `Invalid JSON: ${error}`,
+					}),
+			});
+
+			// Use Schema.decodeUnknown (returns Effect) for proper error handling
+			const parsed = yield* Schema.decodeUnknown(SessionMetadata)(jsonData).pipe(
+				Effect.mapError(
+					(parseError) =>
+						new StorageReadError({
+							key: `session:${sessionId}`,
+							cause: `Schema validation failed: ${formatParseError(parseError)}`,
+						}),
+				),
+			);
+
+			return Option.some(parsed);
 		}),
 
 	putSession: (session) =>
@@ -90,22 +121,46 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 		}),
 
 	getRun: (runId) =>
-		Effect.try({
-			try: () => {
-				const result = sql
-					.exec<{ key: string; data: string }>("SELECT key, data FROM runs WHERE key = ?", runId)
-					.toArray();
-				if (result.length === 0) {
-					return Option.none();
-				}
-				const parsed = Schema.decodeUnknownSync(RunRecord)(JSON.parse(result[0].data));
-				return Option.some(parsed);
-			},
-			catch: (error) =>
-				new StorageReadError({
-					key: `run:${runId}`,
-					cause: String(error),
-				}),
+		Effect.gen(function* () {
+			// Query the database
+			const result = yield* Effect.try({
+				try: () =>
+					sql
+						.exec<{ key: string; data: string }>("SELECT key, data FROM runs WHERE key = ?", runId)
+						.toArray(),
+				catch: (error) =>
+					new StorageReadError({
+						key: `run:${runId}`,
+						cause: String(error),
+					}),
+			});
+
+			if (result.length === 0) {
+				return Option.none();
+			}
+
+			// Parse JSON
+			const jsonData = yield* Effect.try({
+				try: () => JSON.parse(result[0].data) as unknown,
+				catch: (error) =>
+					new StorageReadError({
+						key: `run:${runId}`,
+						cause: `Invalid JSON: ${error}`,
+					}),
+			});
+
+			// Use Schema.decodeUnknown for proper error handling
+			const parsed = yield* Schema.decodeUnknown(RunRecord)(jsonData).pipe(
+				Effect.mapError(
+					(parseError) =>
+						new StorageReadError({
+							key: `run:${runId}`,
+							cause: `Schema validation failed: ${formatParseError(parseError)}`,
+						}),
+				),
+			);
+
+			return Option.some(parsed);
 		}),
 
 	putRun: (run) =>
@@ -128,22 +183,52 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 		}),
 
 	listRuns: (sessionId, limit = 10) =>
-		Effect.try({
-			try: () => {
-				const result = sql
-					.exec<{ data: string }>(
-						"SELECT data FROM runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT ?",
-						sessionId,
-						limit,
-					)
-					.toArray();
-				return result.map((row) => Schema.decodeUnknownSync(RunRecord)(JSON.parse(row.data)));
-			},
-			catch: (error) =>
-				new StorageReadError({
-					key: `runs:${sessionId}`,
-					cause: String(error),
-				}),
+		Effect.gen(function* () {
+			// Query the database
+			const result = yield* Effect.try({
+				try: () =>
+					sql
+						.exec<{ data: string }>(
+							"SELECT data FROM runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT ?",
+							sessionId,
+							limit,
+						)
+						.toArray(),
+				catch: (error) =>
+					new StorageReadError({
+						key: `runs:${sessionId}`,
+						cause: String(error),
+					}),
+			});
+
+			// Parse and validate each row
+			const runs: RunRecord[] = [];
+			for (const row of result) {
+				// Parse JSON
+				const jsonData = yield* Effect.try({
+					try: () => JSON.parse(row.data) as unknown,
+					catch: (error) =>
+						new StorageReadError({
+							key: `runs:${sessionId}`,
+							cause: `Invalid JSON in run record: ${error}`,
+						}),
+				});
+
+				// Use Schema.decodeUnknown for proper error handling
+				const parsed = yield* Schema.decodeUnknown(RunRecord)(jsonData).pipe(
+					Effect.mapError(
+						(parseError) =>
+							new StorageReadError({
+								key: `runs:${sessionId}`,
+								cause: `Schema validation failed: ${formatParseError(parseError)}`,
+							}),
+					),
+				);
+
+				runs.push(parsed);
+			}
+
+			return runs;
 		}),
 
 	initSchema: () =>

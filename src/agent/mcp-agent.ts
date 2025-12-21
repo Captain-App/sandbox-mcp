@@ -15,6 +15,11 @@ import {
   makeStorageLayer,
   type SqlStorageInterface,
 } from "../services/storage";
+import {
+  isSessionError,
+  isStorageError,
+  isWorkflowError,
+} from "../models/errors";
 import type { SessionMetadata } from "../models/session";
 import type { RunRecord } from "../models/run";
 
@@ -23,6 +28,59 @@ import type { RunRecord } from "../models/run";
  */
 interface AgentState {
   initialized: boolean;
+}
+
+/**
+ * Error thrown when runtime is not initialized
+ */
+class RuntimeNotInitializedError extends Error {
+  constructor() {
+    super("MCP Agent runtime not initialized. Call init() first.");
+    this.name = "RuntimeNotInitializedError";
+  }
+}
+
+/**
+ * Get the runtime, throwing if not initialized
+ */
+function getRuntime(
+  runtime: ManagedRuntime.ManagedRuntime<StorageService, never> | null
+): ManagedRuntime.ManagedRuntime<StorageService, never> {
+  if (runtime === null) {
+    throw new RuntimeNotInitializedError();
+  }
+  return runtime;
+}
+
+/**
+ * Format error for MCP response, preserving domain error information
+ */
+function formatDomainError(error: unknown): ReturnType<typeof formatErrorResponse> {
+  // Check for domain-specific errors and use their tags
+  if (isSessionError(error)) {
+    return formatErrorResponse({
+      code: error._tag,
+      message: error.message,
+    });
+  }
+  if (isStorageError(error)) {
+    return formatErrorResponse({
+      code: error._tag,
+      message: error.message,
+    });
+  }
+  if (isWorkflowError(error)) {
+    return formatErrorResponse({
+      code: error._tag,
+      message: error.message,
+    });
+  }
+  
+  // Fallback for unknown errors
+  return formatErrorResponse({
+    code: "UNKNOWN_ERROR",
+    message: error instanceof Error ? error.message : String(error),
+  });
 }
 
 /**
@@ -79,11 +137,12 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       createSessionInputSchema.shape,
       async (params) => {
         try {
+          const rt = getRuntime(this.runtime);
           const sessionId =
             params.sessionId ?? crypto.randomUUID().slice(0, 8);
 
           // Check if session exists (resume)
-          const existing = await this.runtime!.runPromise(
+          const existing = await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               return yield* storage.getSession(sessionId);
@@ -110,8 +169,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           // Note: In production, this should use the actual worker URL
           const webUiUrl = `/session/${sessionId}/`;
 
+          // Note: sessionId is a plain string here (from params or generated),
+          // the branded SessionId type is for the domain model validation
           const session: SessionMetadata = {
-            sessionId,
+            sessionId: sessionId as SessionMetadata["sessionId"],
             sandboxId: sessionId, // 1:1 mapping between session and sandbox
             createdAt: Date.now(),
             lastActivity: Date.now(),
@@ -130,7 +191,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             },
           };
 
-          await this.runtime!.runPromise(
+          await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               yield* storage.putSession(session);
@@ -146,10 +207,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             repository: session.repository,
           });
         } catch (error) {
-          return formatErrorResponse({
-            code: "SESSION_CREATION_FAILED",
-            message: error instanceof Error ? error.message : String(error),
-          });
+          return formatDomainError(error);
         }
       }
     );
@@ -165,8 +223,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       runTaskInputSchema.shape,
       async (params) => {
         try {
+          const rt = getRuntime(this.runtime);
+
           // Verify session exists
-          const session = await this.runtime!.runPromise(
+          const session = await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               return yield* storage.getSession(params.sessionId);
@@ -225,7 +285,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             maxRetries: 3,
           };
 
-          await this.runtime!.runPromise(
+          await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               yield* storage.putRun(run);
@@ -233,7 +293,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           );
 
           // Update session last activity
-          await this.runtime!.runPromise(
+          await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               yield* storage.putSession({
@@ -252,10 +312,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             message: "Task started. Use opencode_get_status to check progress.",
           });
         } catch (error) {
-          return formatErrorResponse({
-            code: "TASK_START_FAILED",
-            message: error instanceof Error ? error.message : String(error),
-          });
+          return formatDomainError(error);
         }
       }
     );
@@ -271,7 +328,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       getStatusInputSchema.shape,
       async (params) => {
         try {
-          const session = await this.runtime!.runPromise(
+          const rt = getRuntime(this.runtime);
+
+          const session = await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               return yield* storage.getSession(params.sessionId);
@@ -286,7 +345,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           }
 
           // Get recent runs
-          const runs = await this.runtime!.runPromise(
+          const runs = await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
               return yield* storage.listRuns(params.sessionId, 10);
@@ -296,10 +355,11 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           // Get specific run if requested
           let currentRun: RunRecord | undefined;
           if (params.runId) {
-            const run = await this.runtime!.runPromise(
+            const runId = params.runId;
+            const run = await rt.runPromise(
               Effect.gen(function* () {
                 const storage = yield* StorageService;
-                return yield* storage.getRun(params.runId!);
+                return yield* storage.getRun(runId);
               })
             );
             if (run._tag === "Some") {
@@ -325,10 +385,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             ...(currentRun && { currentRun }),
           });
         } catch (error) {
-          return formatErrorResponse({
-            code: "STATUS_CHECK_FAILED",
-            message: error instanceof Error ? error.message : String(error),
-          });
+          return formatDomainError(error);
         }
       }
     );
@@ -349,7 +406,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       branch?: string;
     };
   }): Promise<void> {
-    await this.runtime!.runPromise(
+    const rt = getRuntime(this.runtime);
+    
+    await rt.runPromise(
       Effect.gen(function* () {
         const storage = yield* StorageService;
         const existing = yield* storage.getRun(params.runId);
