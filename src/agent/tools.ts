@@ -28,6 +28,12 @@ export const createSessionInputSchema = z.object({
 
   branch: z.string().optional().describe("Git branch to checkout. Defaults to main."),
 
+  directory: z
+    .string()
+    .optional()
+    .default("/workspace")
+    .describe("Working directory path in the container. Defaults to '/workspace'."),
+
   title: z.string().optional().describe("Human-readable session title"),
 });
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;

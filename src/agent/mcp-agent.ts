@@ -101,16 +101,23 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             });
           }
 
-          // TODO: Create sandbox, mount R2, clone repo, start OpenCode
-          // For now, create session metadata only
+          // Create session metadata
+          // The web UI URL points to our proxy endpoint which will wake the sandbox
+          // and forward requests to OpenCode. The actual sandbox setup happens lazily
+          // when the first task runs or when the user visits the web UI.
+          //
+          // URL pattern: /session/{sessionId}/ - handled by the web UI proxy in index.ts
+          // Note: In production, this should use the actual worker URL
+          const webUiUrl = `/session/${sessionId}/`;
+
           const session: SessionMetadata = {
             sessionId,
-            sandboxId: sessionId,
+            sandboxId: sessionId, // 1:1 mapping between session and sandbox
             createdAt: Date.now(),
             lastActivity: Date.now(),
-            status: "creating",
+            status: "idle", // Session is ready but sandbox starts lazily
             workspacePath: "/workspace",
-            webUiUrl: `https://${sessionId}.sandbox.example.com`, // Placeholder
+            webUiUrl,
             repository: params.repositoryUrl
               ? {
                   url: params.repositoryUrl,

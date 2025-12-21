@@ -20,6 +20,8 @@ interface TaskParams {
   branch?: string;
   // OpenCode config with provider API keys
   opencodeConfig?: Config;
+  // Git credentials for authenticated operations
+  githubToken?: string;
 }
 
 interface TaskResult {
@@ -78,7 +80,12 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
         return this.restoreSession(sandbox, params.sessionId);
       });
 
-      // Step 4: Clone repository if needed
+      // Step 4: Set up git credentials if GITHUB_TOKEN is available
+      await step.do("setup-git-credentials", async () => {
+        await this.setupGitCredentials(sandbox);
+      });
+
+      // Step 5: Clone repository if needed
       if (params.repositoryUrl) {
         await step.do("clone-repository", async () => {
           await this.cloneRepository(
@@ -89,7 +96,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
         });
       }
 
-      // Step 5: Start OpenCode and execute task
+      // Step 6: Start OpenCode and execute task
       const taskResult = await step.do(
         "execute-opencode-task",
         {
@@ -105,12 +112,12 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
         }
       );
 
-      // Step 6: Backup session state to R2
+      // Step 7: Backup session state to R2
       await step.do("backup-session", async () => {
         await this.backupSession(sandbox, params.sessionId);
       });
 
-      // Step 7: Get git status for the result
+      // Step 8: Get git status for the result
       const gitInfo = await step.do("get-git-status", async () => {
         return this.getGitStatus(sandbox);
       });
@@ -125,7 +132,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
         branch: gitInfo.branch,
       };
 
-      // Step 8: Notify DO via RPC callback
+      // Step 9: Notify DO via RPC callback
       await step.do("notify-completion", async () => {
         await this.notifyCompletion(params.doId, params.runId, result);
       });
@@ -157,6 +164,39 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       normalizeId: true,
       sleepAfter: "10 minutes",
     });
+  }
+
+  /**
+   * Set up git credentials for authenticated operations
+   * This configures git to use GITHUB_TOKEN for HTTPS operations
+   */
+  private async setupGitCredentials(sandbox: Sandbox<unknown>): Promise<void> {
+    const githubToken = this.env.GITHUB_TOKEN;
+
+    if (!githubToken) {
+      console.warn("GITHUB_TOKEN not configured, git operations may fail");
+      return;
+    }
+
+    // Configure git credential helper to use the token
+    // This approach stores credentials in memory for the session
+    await sandbox.exec(
+      `git config --global credential.helper store`
+    );
+
+    // Store the credentials for github.com
+    await sandbox.exec(
+      `echo "https://x-access-token:${githubToken}@github.com" > ~/.git-credentials`
+    );
+
+    // Set git user info for commits
+    await sandbox.exec(
+      `git config --global user.email "opencode@sandbox.workers.dev"`
+    );
+    await sandbox.exec(`git config --global user.name "OpenCode Bot"`);
+
+    // Also set the GH CLI token for gh commands
+    await sandbox.exec(`echo "${githubToken}" | gh auth login --with-token 2>/dev/null || true`);
   }
 
   /**
@@ -282,23 +322,31 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     });
 
     try {
-      // Create or get session
-      let sessionId: string;
-      try {
-        const existing = (await client.session.get({
-          path: { id: params.sessionId },
-        })) as { data: { id: string } };
-        sessionId = existing.data.id;
-      } catch {
+      // Get or create OpenCode session
+      // Since we have 1:1 mapping between our session and sandbox,
+      // we use the first OpenCode session if one exists, or create a new one.
+      // The session state is persisted via backup/restore to R2.
+      let opencodeSessionId: string;
+
+      // Try to list existing sessions
+      const existingSessions = (await client.session.list({})) as {
+        data?: Array<{ id: string }>;
+      };
+
+      if (existingSessions.data && existingSessions.data.length > 0) {
+        // Use the first existing session (there should only be one per sandbox)
+        opencodeSessionId = existingSessions.data[0].id;
+      } else {
+        // Create a new session
         const created = (await client.session.create({
-          body: { title: `Task: ${params.task.slice(0, 50)}` },
+          body: { title: `Session: ${params.sessionId}` },
         })) as { data: { id: string } };
-        sessionId = created.data.id;
+        opencodeSessionId = created.data.id;
       }
 
       // Execute the task
       const response = (await client.session.prompt({
-        path: { id: sessionId },
+        path: { id: opencodeSessionId },
         body: {
           model: {
             providerID: "anthropic",
