@@ -105,6 +105,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     version: "1.0.0",
   });
 
+  /** @public Required by McpAgent base class */
   initialState: AgentState = {
     initialized: false,
   };
@@ -123,6 +124,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
   /**
    * Initialize the MCP server with tools
+   * @public Called by McpAgent framework on DO start
    */
   async init(): Promise<void> {
     // Access SQL storage from the Durable Object state
@@ -508,6 +510,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
   /**
    * RPC method called by Workflow when task completes
+   * @public Called via DO RPC from ExecuteTaskWorkflow
    */
   async onTaskComplete(params: {
     runId: string;

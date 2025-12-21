@@ -14,6 +14,7 @@ export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundErro
 	"SessionNotFoundError",
 	{ sessionId: Schema.String },
 ) {
+	/** @public Used by isSessionError type guard */
 	readonly [SessionErrorTypeId]: SessionErrorTypeId = SessionErrorTypeId;
 
 	override get message(): string {
@@ -32,6 +33,7 @@ export class StorageReadError extends Schema.TaggedError<StorageReadError>()("St
 	key: Schema.String,
 	cause: Schema.String,
 }) {
+	/** @public Used by isStorageError type guard */
 	readonly [StorageErrorTypeId]: StorageErrorTypeId = StorageErrorTypeId;
 
 	override get message(): string {
@@ -43,6 +45,7 @@ export class StorageWriteError extends Schema.TaggedError<StorageWriteError>()("
 	key: Schema.String,
 	cause: Schema.String,
 }) {
+	/** @public Used by isStorageError type guard */
 	readonly [StorageErrorTypeId]: StorageErrorTypeId = StorageErrorTypeId;
 
 	override get message(): string {

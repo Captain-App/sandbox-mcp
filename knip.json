@@ -7,12 +7,9 @@
   "ignoreDependencies": [
     "cloudflare"
   ],
-  "ignoreMembers": [
-    "initialState",
-    "init",
-    "onTaskComplete",
-    "\\[.*TypeId\\]"
-  ],
+  "rules": {
+    "classMembers": "error"
+  },
   "wrangler": {
     "config": ["wrangler.jsonc"]
   },
