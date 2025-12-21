@@ -180,7 +180,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             this as unknown as { ctx: DurableObjectState }
           ).ctx.id.toString();
 
-          // Create workflow to execute task
+          // Create workflow to execute task with OpenCode config
           const workflowInstance = await this.env.EXECUTE_TASK_WORKFLOW.create({
             id: runId,
             params: {
@@ -192,6 +192,16 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               doId,
               repositoryUrl: session.value.repository?.url,
               branch: session.value.repository?.branch,
+              // Pass OpenCode config with Anthropic API key
+              opencodeConfig: {
+                provider: {
+                  anthropic: {
+                    options: {
+                      apiKey: this.env.ANTHROPIC_API_KEY,
+                    },
+                  },
+                },
+              },
             },
           });
 

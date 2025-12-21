@@ -1,8 +1,14 @@
 // src/services/opencode.ts
 import { Context, Effect, Layer } from "effect";
-import { createOpencode } from "@opencode-ai/sdk";
-import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { Sandbox } from "@cloudflare/sandbox";
+import {
+  createOpencode,
+  createOpencodeServer,
+  proxyToOpencode,
+  type OpencodeServer,
+} from "@cloudflare/sandbox/opencode";
+import type { OpencodeClient } from "@opencode-ai/sdk";
+import type { Config } from "@opencode-ai/sdk";
 import {
   OpenCodeStartupError,
   OpenCodeExecutionError,
@@ -15,6 +21,7 @@ import {
 export interface OpenCodeTaskResult {
   success: boolean;
   output: string;
+  error?: string;
   filesCreated: string[];
   filesModified: string[];
   commits: string[];
@@ -22,63 +29,53 @@ export interface OpenCodeTaskResult {
 }
 
 /**
- * OpenCode server instance
+ * OpenCode instance running in a sandbox
  */
-export interface OpenCodeServer {
-  url: string;
+export interface OpenCodeInstance {
   client: OpencodeClient;
-  close: () => void;
+  server: OpencodeServer;
 }
 
 /**
- * OpenCode service interface
+ * Options for starting OpenCode in a sandbox
+ */
+export interface OpenCodeOptions {
+  /** Port to run the server on (default: 4096) */
+  port?: number;
+  /** Working directory for OpenCode (default: /workspace) */
+  directory?: string;
+  /** OpenCode configuration including provider API keys */
+  config?: Config;
+}
+
+/**
+ * OpenCode service interface - runs OpenCode inside Cloudflare Sandboxes
  */
 export interface OpenCodeServiceInterface {
   /**
-   * Start OpenCode server in a sandbox
-   * This runs the opencode binary inside the sandbox and returns connection info
+   * Start OpenCode server in a sandbox and get a typed SDK client.
+   * The client routes all requests through the sandbox container.
    */
-  readonly startInSandbox: (
+  readonly startOpencode: (
     sandbox: Sandbox<unknown>,
-    options?: {
-      port?: number;
-      directory?: string;
-    }
-  ) => Effect.Effect<
-    { port: number; url: string; sessionId: string },
-    OpenCodeStartupError
-  >;
+    options?: OpenCodeOptions
+  ) => Effect.Effect<OpenCodeInstance, OpenCodeStartupError>;
 
   /**
-   * Execute a task using OpenCode running in a sandbox
-   * Connects to the OpenCode server running inside the sandbox
+   * Start OpenCode server only (without SDK client).
+   * Use this if you only need to proxy web UI requests.
    */
-  readonly executeTaskInSandbox: (
+  readonly startServer: (
     sandbox: Sandbox<unknown>,
-    params: {
-      sessionId: string;
-      task: string;
-      model: string;
-      opencodeUrl: string;
-    }
-  ) => Effect.Effect<
-    OpenCodeTaskResult,
-    OpenCodeExecutionError | OpenCodeTimeoutError
-  >;
+    options?: OpenCodeOptions
+  ) => Effect.Effect<OpencodeServer, OpenCodeStartupError>;
 
   /**
-   * Start a local OpenCode server (for testing/development)
-   */
-  readonly startLocal: (options?: {
-    port?: number;
-    directory?: string;
-  }) => Effect.Effect<OpenCodeServer, OpenCodeStartupError>;
-
-  /**
-   * Execute a task using local OpenCode client
+   * Execute a task using OpenCode running in a sandbox.
+   * Creates or reuses a session and sends the prompt.
    */
   readonly executeTask: (
-    client: OpencodeClient,
+    instance: OpenCodeInstance,
     params: {
       sessionId: string;
       task: string;
@@ -88,65 +85,35 @@ export interface OpenCodeServiceInterface {
     OpenCodeTaskResult,
     OpenCodeExecutionError | OpenCodeTimeoutError
   >;
+
+  /**
+   * Proxy an HTTP request to the OpenCode web UI.
+   * Handles the ?url= parameter required for OpenCode's frontend.
+   */
+  readonly proxyWebUI: (
+    request: Request,
+    sandbox: Sandbox<unknown>,
+    server: OpencodeServer
+  ) => Effect.Effect<Response, OpenCodeExecutionError>;
 }
-
-/**
- * Parse OpenCode response to extract result info
- */
-const parseOpenCodeResponse = (response: unknown): OpenCodeTaskResult => {
-  // Extract meaningful info from OpenCode response
-  const data = response as {
-    data?: {
-      parts?: Array<{ type: string; text?: string }>;
-    };
-  };
-
-  const textParts =
-    data?.data?.parts
-      ?.filter((p) => p.type === "text")
-      ?.map((p) => p.text ?? "") ?? [];
-
-  return {
-    success: true,
-    output: textParts.join("\n"),
-    filesCreated: [], // Would need to parse from response or git status
-    filesModified: [],
-    commits: [],
-    branch: undefined,
-  };
-};
 
 /**
  * Create OpenCode service
  */
 export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
-  startInSandbox: (sandbox, options = {}) =>
+  startOpencode: (sandbox, options = {}) =>
     Effect.tryPromise({
       try: async () => {
-        const port = options.port ?? 4096;
-        const directory = options.directory ?? "/workspace";
-
-        // Start opencode server inside the sandbox
-        // The opencode binary should be available in the sandbox
-        const result = await sandbox.exec(
-          `cd ${directory} && opencode serve --port ${port} --json &`
+        const { client, server } = await createOpencode<OpencodeClient>(
+          sandbox,
+          {
+            port: options.port ?? 4096,
+            directory: options.directory ?? "/workspace",
+            config: options.config,
+          }
         );
 
-        if (result.exitCode !== 0) {
-          throw new Error(`Failed to start opencode: ${result.stderr}`);
-        }
-
-        // Wait a bit for the server to start
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // Generate a session ID
-        const sessionId = `session-${Date.now()}`;
-
-        return {
-          port,
-          url: `http://localhost:${port}`,
-          sessionId,
-        };
+        return { client, server };
       },
       catch: (error) =>
         new OpenCodeStartupError({
@@ -154,48 +121,14 @@ export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
         }),
     }),
 
-  executeTaskInSandbox: (sandbox, params) =>
+  startServer: (sandbox, options = {}) =>
     Effect.tryPromise({
       try: async () => {
-        // Execute the task by calling the opencode API inside the sandbox
-        const curlCmd = `curl -X POST ${params.opencodeUrl}/api/v1/sessions/${params.sessionId}/prompt \
-          -H "Content-Type: application/json" \
-          -d '${JSON.stringify({
-            model: {
-              providerID: "anthropic",
-              modelID: params.model,
-            },
-            parts: [{ type: "text", text: params.task }],
-          })}'`;
-
-        const result = await sandbox.exec(curlCmd);
-
-        if (result.exitCode !== 0) {
-          throw new Error(`OpenCode request failed: ${result.stderr}`);
-        }
-
-        const response = JSON.parse(result.stdout);
-        return parseOpenCodeResponse(response);
-      },
-      catch: (error) =>
-        new OpenCodeExecutionError({
-          sessionId: params.sessionId,
-          cause: String(error),
-        }),
-    }),
-
-  startLocal: (options = {}) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { client, server } = await createOpencode({
+        return await createOpencodeServer(sandbox, {
           port: options.port ?? 4096,
+          directory: options.directory ?? "/workspace",
+          config: options.config,
         });
-
-        return {
-          url: server.url,
-          client,
-          close: server.close,
-        };
       },
       catch: (error) =>
         new OpenCodeStartupError({
@@ -203,17 +136,21 @@ export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
         }),
     }),
 
-  executeTask: (client, params) =>
+  executeTask: (instance, params) =>
     Effect.gen(function* () {
+      const { client } = instance;
+
       // Create or get session
       const sessionData = yield* Effect.tryPromise({
         try: async () => {
           try {
+            // Try to get existing session
             const existing = await client.session.get({
               path: { id: params.sessionId },
             });
             return existing as { data: { id: string } };
           } catch {
+            // Create new session if doesn't exist
             const created = await client.session.create({
               body: { title: `Task: ${params.task.slice(0, 50)}` },
             });
@@ -262,17 +199,56 @@ export const makeOpenCodeService = (): OpenCodeServiceInterface => ({
         )
       );
 
+      // Parse response
       return parseOpenCodeResponse(response);
+    }),
+
+  proxyWebUI: (request, sandbox, server) =>
+    Effect.tryPromise({
+      try: async () => {
+        const result = proxyToOpencode(request, sandbox, server);
+        // proxyToOpencode can return Response or Promise<Response>
+        return result instanceof Promise ? await result : result;
+      },
+      catch: (error) =>
+        new OpenCodeExecutionError({
+          sessionId: "webui",
+          cause: `Failed to proxy request: ${error}`,
+        }),
     }),
 });
 
 /**
+ * Parse OpenCode response to extract result info
+ */
+function parseOpenCodeResponse(response: unknown): OpenCodeTaskResult {
+  const data = response as {
+    data?: {
+      parts?: Array<{ type: string; text?: string }>;
+    };
+  };
+
+  const textParts =
+    data?.data?.parts
+      ?.filter((p) => p.type === "text")
+      ?.map((p) => p.text ?? "") ?? [];
+
+  return {
+    success: true,
+    output: textParts.join("\n"),
+    filesCreated: [],
+    filesModified: [],
+    commits: [],
+    branch: undefined,
+  };
+}
+
+/**
  * OpenCode service context tag
  */
-export class OpenCodeService extends Context.Tag("@sandbox-mcp/OpenCodeService")<
-  OpenCodeService,
-  OpenCodeServiceInterface
->() {}
+export class OpenCodeService extends Context.Tag(
+  "@sandbox-mcp/OpenCodeService"
+)<OpenCodeService, OpenCodeServiceInterface>() {}
 
 /**
  * OpenCode service layer

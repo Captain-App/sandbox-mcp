@@ -9,7 +9,7 @@
 		"enabled": true
 	},
 
-	// Durable Objects
+	// Durable Objects - our MCP Agent
 	"durable_objects": {
 		"bindings": [
 			{
@@ -27,7 +27,15 @@
 		}
 	],
 
-	// R2 bucket for session persistence
+	// Sandbox binding - connects to Cloudflare Sandbox infrastructure
+	// This requires the sandbox product to be enabled on the account
+	"containers": {
+		"SANDBOX": {
+			"image": "@cloudflare/sandbox:opencode"
+		}
+	},
+
+	// R2 bucket for session persistence (workspace files + OpenCode state)
 	"r2_buckets": [
 		{
 			"binding": "SESSIONS_BUCKET",
@@ -44,7 +52,9 @@
 		}
 	],
 
-	// Environment variables (non-sensitive)
+	// Environment variables
+	// Secrets (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, ANTHROPIC_API_KEY) 
+	// should be set via wrangler secret put
 	"vars": {
 		"ENVIRONMENT": "development"
 	}
