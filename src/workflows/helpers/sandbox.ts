@@ -1,7 +1,7 @@
 // src/workflows/helpers/sandbox.ts
 import { getSandbox as cfGetSandbox, type Sandbox } from "@cloudflare/sandbox";
 
-import { configureAnthropic, configureGithub, configureR2 } from "../../proxy";
+import { configureAnthropic, configureGithub, configureR2, toContainerUrl } from "../../proxy";
 import type { WorkflowDeps } from "./types";
 
 /**
@@ -29,8 +29,9 @@ export async function configureSandboxProxy(
   proxyBaseUrl: string,
   proxyToken: string,
 ): Promise<void> {
-  await configureAnthropic(sandbox, proxyBaseUrl, proxyToken);
-  await configureGithub(sandbox, proxyBaseUrl, proxyToken);
+  const containerProxyUrl = toContainerUrl(proxyBaseUrl);
+  await configureAnthropic(sandbox, containerProxyUrl, proxyToken);
+  await configureGithub(sandbox, containerProxyUrl, proxyToken);
 }
 
 /**
@@ -46,9 +47,10 @@ export async function mountR2Storage(
   proxyToken: string,
 ): Promise<void> {
   const bucket = "opencode-sessions";
-  const mountPath = "/workspace";
+  const mountPath = "/workspace/storage";
+  const containerProxyUrl = toContainerUrl(proxyBaseUrl);
 
-  await configureR2(sandbox, proxyBaseUrl, proxyToken, `${bucket}/${sessionId}`, mountPath);
+  await configureR2(sandbox, containerProxyUrl, proxyToken, `${bucket}/${sessionId}`, mountPath);
 }
 
 /**
@@ -56,34 +58,50 @@ export async function mountR2Storage(
  * Authentication is handled by the proxy via configureGithub().
  */
 export async function setupGitConfig(sandbox: Sandbox<unknown>): Promise<void> {
-  // Set git user info for commits
   await sandbox.exec(`git config --global user.email "opencode@sandbox.workers.dev"`);
   await sandbox.exec(`git config --global user.name "OpenCode Bot"`);
 }
 
 /**
- * Clone a git repository into /workspace
+ * Extract repository name from URL for use as subdirectory.
+ * e.g., "https://github.com/owner/repo" -> "repo"
+ *       "https://github.com/owner/repo.git" -> "repo"
+ */
+function getRepoName(url: string): string {
+  const match = url.match(/\/([^/]+?)(\.git)?$/);
+  return match ? match[1] : "repo";
+}
+
+/**
+ * Clone a git repository into /workspace/{repo-name}
  */
 export async function cloneRepository(
   sandbox: Sandbox<unknown>,
   url: string,
   branch?: string,
-): Promise<void> {
+): Promise<string> {
+  const repoName = getRepoName(url);
+  const targetDir = `/workspace/${repoName}`;
+
   // Check if already cloned
-  const checkResult = await sandbox.exec("test -d /workspace/.git && echo exists || echo missing");
+  const checkResult = await sandbox.exec(
+    `test -d ${targetDir}/.git && echo exists || echo missing`,
+  );
 
   if (checkResult.stdout.trim() === "exists") {
     // Already cloned, just fetch latest
-    await sandbox.exec("cd /workspace && git fetch origin");
+    await sandbox.exec(`cd ${targetDir} && git fetch origin`);
     if (branch) {
-      await sandbox.exec(`cd /workspace && git checkout ${branch}`);
+      await sandbox.exec(`cd ${targetDir} && git checkout ${branch}`);
     }
-    return;
+    return targetDir;
   }
 
   // Clone the repository
   await sandbox.gitCheckout(url, {
     branch: branch ?? "main",
-    targetDir: "/workspace",
+    targetDir,
   });
+
+  return targetDir;
 }

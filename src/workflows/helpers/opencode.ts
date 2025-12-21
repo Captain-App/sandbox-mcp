@@ -3,6 +3,7 @@ import type { Sandbox } from "@cloudflare/sandbox";
 import { createOpencode } from "@cloudflare/sandbox/opencode";
 import type { Config, OpencodeClient } from "@opencode-ai/sdk";
 
+import { toContainerUrl } from "../../proxy";
 import type {
   OpenCodePromptResponse,
   OpenCodeSessionCreateResponse,
@@ -18,12 +19,13 @@ import type {
  * The proxy validates the JWT and injects the real ANTHROPIC_API_KEY.
  */
 function buildProxyConfig(proxyBaseUrl: string, proxyToken: string): Config {
+  const containerProxyUrl = toContainerUrl(proxyBaseUrl);
   return {
     provider: {
       anthropic: {
         options: {
           apiKey: proxyToken,
-          baseURL: `${proxyBaseUrl}/proxy/anthropic`,
+          baseURL: `${containerProxyUrl}/proxy/anthropic`,
         },
       },
     },
@@ -35,10 +37,15 @@ function buildProxyConfig(proxyBaseUrl: string, proxyToken: string): Config {
  *
  * Starts OpenCode server with proxy configuration, creates/gets session,
  * and executes the task. All API calls go through the proxy.
+ *
+ * @param sandbox - The sandbox instance
+ * @param params - Task parameters
+ * @param workingDirectory - The directory to run OpenCode in (e.g., /workspace/repo)
  */
 export async function executeTask(
   sandbox: Sandbox<unknown>,
   params: TaskParams,
+  workingDirectory: string,
 ): Promise<OpenCodeTaskResult> {
   // Build proxy-based config
   const config = buildProxyConfig(params.proxyBaseUrl, params.proxyToken);
@@ -46,7 +53,7 @@ export async function executeTask(
   // Start OpenCode server in the sandbox and get SDK client
   const { client, server } = await createOpencode<OpencodeClient>(sandbox, {
     port: 4096,
-    directory: "/workspace",
+    directory: workingDirectory,
     config,
   });
 
@@ -56,7 +63,7 @@ export async function executeTask(
 
     // Try to list existing sessions with proper directory context
     const existingSessions = (await client.session.list({
-      query: { directory: "/workspace" },
+      query: { directory: workingDirectory },
     })) as OpenCodeSessionListResponse;
 
     if (existingSessions.data && existingSessions.data.length > 0) {
@@ -66,7 +73,7 @@ export async function executeTask(
       // Create a new session with directory context
       const created = (await client.session.create({
         body: { title: `Session: ${params.sessionId}` },
-        query: { directory: "/workspace" },
+        query: { directory: workingDirectory },
       })) as OpenCodeSessionCreateResponse;
 
       if (!created.data?.id) {
@@ -78,7 +85,7 @@ export async function executeTask(
     // Execute the task with proper directory context
     const response = (await client.session.prompt({
       path: { id: opencodeSessionId },
-      query: { directory: "/workspace" },
+      query: { directory: workingDirectory },
       body: {
         model: {
           providerID: "anthropic",

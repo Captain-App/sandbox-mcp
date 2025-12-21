@@ -90,12 +90,19 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       telemetry.setMetadata({ sessionRestored: restoreResult.restored });
 
       // Step 4: Clone repository if needed (git uses proxy for auth)
+      // Returns the working directory where the repo was cloned
+      let workingDirectory = "/workspace";
       if (params.repositoryUrl) {
-        await step.do("clone-repository", async () => {
+        const cloneResult = await step.do("clone-repository", async () => {
           const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-          await Sandbox.cloneRepository(sandbox, params.repositoryUrl!, params.branch);
-          return { cloned: true };
+          const targetDir = await Sandbox.cloneRepository(
+            sandbox,
+            params.repositoryUrl!,
+            params.branch,
+          );
+          return { cloned: true, targetDir };
         });
+        workingDirectory = cloneResult.targetDir;
       }
 
       // Step 5: Start OpenCode and execute task
@@ -111,7 +118,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
         },
         async () => {
           const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-          return OpenCode.executeTask(sandbox, params);
+          return OpenCode.executeTask(sandbox, params, workingDirectory);
         },
       );
 
@@ -125,7 +132,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       // Step 7: Get git status for the result
       const gitInfo = await step.do("get-git-status", async () => {
         const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-        return Git.getStatus(sandbox);
+        return Git.getStatus(sandbox, workingDirectory);
       });
 
       const result: TaskResult = {

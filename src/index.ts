@@ -13,6 +13,7 @@ import {
   createProxyToken,
   github,
   r2,
+  toContainerUrl,
 } from "./proxy";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 
@@ -44,12 +45,13 @@ const proxyHandler = createProxyHandler<Env>({
  * The proxy validates the JWT and injects the real ANTHROPIC_API_KEY.
  */
 function getProxyOpencodeConfig(proxyBaseUrl: string, proxyToken: string): Config {
+  const containerProxyUrl = toContainerUrl(proxyBaseUrl);
   return {
     provider: {
       anthropic: {
         options: {
           apiKey: proxyToken,
-          baseURL: `${proxyBaseUrl}/proxy/anthropic`,
+          baseURL: `${containerProxyUrl}/proxy/anthropic`,
         },
       },
     },
@@ -74,7 +76,7 @@ export default {
 
     // MCP endpoint - route to McpAgent
     if (url.pathname.startsWith("/mcp")) {
-      return OpenCodeMcpAgent.serve("/mcp").fetch(request, env, ctx);
+      return OpenCodeMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 
     // Web UI proxy - /session/{sessionId}/* routes to OpenCode web UI
@@ -99,8 +101,9 @@ export default {
         );
 
         // Configure sandbox to use proxy for external services
-        await configureAnthropic(sandbox, env.PROXY_BASE_URL, proxyToken);
-        await configureGithub(sandbox, env.PROXY_BASE_URL, proxyToken);
+        const containerProxyUrl = toContainerUrl(env.PROXY_BASE_URL);
+        await configureAnthropic(sandbox, containerProxyUrl, proxyToken);
+        await configureGithub(sandbox, containerProxyUrl, proxyToken);
 
         // Start OpenCode server with proxy-based config
         const server = await createOpencodeServer(sandbox, {

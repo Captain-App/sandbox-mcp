@@ -137,16 +137,21 @@ export const r2: ServiceConfig<Env> = {
 };
 
 /**
- * Mount an R2 bucket via the proxy using the SDK's mountBucket().
+ * Mount an R2 bucket via the proxy using s3fs.
  *
  * The JWT token is used as the accessKeyId, which the proxy extracts from
  * AWS Sig V4 headers and validates. The secretAccessKey is required by s3fs
  * format but ignored by the proxy.
  *
+ * NOTE: Using direct s3fs exec instead of SDK's mountBucket() because
+ * mountBucket() validates bucket names and rejects path prefixes like
+ * "bucket/sessionId". We need path prefixes for session isolation.
+ * TODO: Revisit once SDK supports path prefixes in bucket names.
+ *
  * @param sandbox - The sandbox instance to configure
  * @param proxyBase - Base URL of the proxy (e.g., 'https://worker.dev')
  * @param token - JWT proxy token
- * @param bucket - R2 bucket name (can include path prefix like 'bucket/prefix')
+ * @param bucket - R2 bucket name with optional path prefix (e.g., 'bucket/sessionId')
  * @param mountPath - Path to mount the bucket at in the sandbox
  */
 export async function configureR2(
@@ -157,14 +162,30 @@ export async function configureR2(
   mountPath: string,
 ): Promise<void> {
   const proxyEndpoint = `${proxyBase}/proxy/r2`;
+  const passwordFilePath = `/tmp/.passwd-s3fs-${bucket.replace(/\//g, "-")}`;
 
-  await sandbox.mountBucket(bucket, mountPath, {
-    endpoint: proxyEndpoint,
-    credentials: {
-      accessKeyId: token, // JWT token - proxy extracts and validates
-      secretAccessKey: "unused", // Required by s3fs format, ignored by proxy
-    },
-    // Use path-style URLs (bucket in path, not subdomain)
-    s3fsOptions: ["use_path_request_style"],
-  });
+  // s3fs password file format: bucket:accessKeyId:secretAccessKey
+  // JWT token is used as accessKeyId - proxy extracts and validates it
+  await sandbox.writeFile(passwordFilePath, `${bucket}:${token}:unused`);
+  await sandbox.exec(`chmod 0600 ${passwordFilePath}`);
+  await sandbox.exec(`mkdir -p ${mountPath}`);
+
+  const s3fsCmd = [
+    `s3fs ${bucket} ${mountPath}`,
+    `-o passwd_file=${passwordFilePath}`,
+    `-o url=${proxyEndpoint}`,
+    `-o use_path_request_style`,
+  ].join(" ");
+
+  await sandbox.exec(s3fsCmd);
+
+  // SDK mountBucket() approach - commented out due to bucket name validation issue
+  // await sandbox.mountBucket(bucket, mountPath, {
+  //   endpoint: proxyEndpoint,
+  //   credentials: {
+  //     accessKeyId: token,
+  //     secretAccessKey: "unused",
+  //   },
+  //   s3fsOptions: ["use_path_request_style"],
+  // });
 }
