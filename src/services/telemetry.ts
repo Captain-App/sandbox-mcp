@@ -1,0 +1,343 @@
+// src/services/telemetry.ts
+/**
+ * Wide Event / Canonical Log Line implementation
+ *
+ * Inspired by https://loggingsucks.com/ - instead of scattered log lines,
+ * we emit ONE comprehensive event per request with all context.
+ *
+ * This module provides helpers to build and emit wide events that can be
+ * queried, aggregated, and analyzed effectively.
+ */
+
+import { Context, Effect, Layer } from "effect";
+
+/**
+ * Wide event structure for MCP tool calls
+ */
+export interface ToolCallEvent {
+  // Identifiers
+  timestamp: string;
+  requestId: string;
+  tool: string;
+
+  // Service info
+  service: "sandbox-mcp";
+  version: string;
+
+  // Request details
+  sessionId?: string;
+  runId?: string;
+  workflowId?: string;
+
+  // Timing
+  durationMs?: number;
+  phases?: Record<string, number>; // phase name -> duration in ms
+
+  // Outcome
+  outcome: "success" | "error";
+  statusCode?: string;
+
+  // Error details (if outcome === "error")
+  error?: {
+    type: string;
+    code: string;
+    message: string;
+    retriable: boolean;
+  };
+
+  // Task context (for run_task)
+  task?: {
+    length: number;
+    model: string;
+  };
+
+  // Session context
+  session?: {
+    status: string;
+    hasRepository: boolean;
+    repositoryUrl?: string;
+  };
+
+  // Additional context
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Wide event structure for workflow execution
+ */
+export interface WorkflowEvent {
+  // Identifiers
+  timestamp: string;
+  workflowId: string;
+  runId: string;
+  sessionId: string;
+
+  // Service info
+  service: "sandbox-mcp";
+  version: string;
+
+  // Timing
+  durationMs?: number;
+  phases?: {
+    sandboxAcquire?: number;
+    storageMount?: number;
+    stateRestore?: number;
+    gitSetup?: number;
+    repoClone?: number;
+    opencodeStart?: number;
+    taskExecution?: number;
+    stateBackup?: number;
+  };
+
+  // Outcome
+  outcome: "success" | "error" | "timeout";
+
+  // Error details
+  error?: {
+    type: string;
+    code: string;
+    message: string;
+    phase: string;
+    retriable: boolean;
+  };
+
+  // Task context
+  task?: {
+    length: number;
+    model: string;
+  };
+
+  // Result summary
+  result?: {
+    filesCreated: number;
+    filesModified: number;
+    commits: number;
+  };
+
+  // Additional context
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Mutable event builder - accumulates context throughout request lifecycle
+ */
+export class ToolCallEventBuilder {
+  private event: ToolCallEvent;
+  private startTime: number;
+  private phaseTimers: Map<string, number> = new Map();
+
+  constructor(tool: string, requestId: string) {
+    this.startTime = Date.now();
+    this.event = {
+      tool,
+      requestId,
+      timestamp: new Date().toISOString(),
+      service: "sandbox-mcp",
+      version: "1.0.0",
+      outcome: "success",
+    };
+  }
+
+  setSessionId(sessionId: string): this {
+    this.event.sessionId = sessionId;
+    return this;
+  }
+
+  setRunId(runId: string): this {
+    this.event.runId = runId;
+    return this;
+  }
+
+  setWorkflowId(workflowId: string): this {
+    this.event.workflowId = workflowId;
+    return this;
+  }
+
+  setOutcome(outcome: "success" | "error"): this {
+    this.event.outcome = outcome;
+    return this;
+  }
+
+  setError(error: ToolCallEvent["error"]): this {
+    this.event.error = error;
+    this.event.outcome = "error";
+    return this;
+  }
+
+  setTask(task: ToolCallEvent["task"]): this {
+    this.event.task = task;
+    return this;
+  }
+
+  setSession(session: ToolCallEvent["session"]): this {
+    this.event.session = session;
+    return this;
+  }
+
+  setMetadata(metadata: Record<string, unknown>): this {
+    this.event.metadata = { ...this.event.metadata, ...metadata };
+    return this;
+  }
+
+  startPhase(name: string): this {
+    this.phaseTimers.set(name, Date.now());
+    return this;
+  }
+
+  endPhase(name: string): this {
+    const start = this.phaseTimers.get(name);
+    if (start) {
+      const duration = Date.now() - start;
+      this.event.phases = { ...this.event.phases, [name]: duration };
+      this.phaseTimers.delete(name);
+    }
+    return this;
+  }
+
+  finalize(): ToolCallEvent {
+    this.event.durationMs = Date.now() - this.startTime;
+    return this.event;
+  }
+}
+
+/**
+ * Workflow event builder
+ */
+export class WorkflowEventBuilder {
+  private event: WorkflowEvent;
+  private startTime: number;
+  private phaseTimers: Map<string, number> = new Map();
+
+  constructor(workflowId: string, runId: string, sessionId: string) {
+    this.startTime = Date.now();
+    this.event = {
+      workflowId,
+      runId,
+      sessionId,
+      timestamp: new Date().toISOString(),
+      service: "sandbox-mcp",
+      version: "1.0.0",
+      outcome: "success",
+    };
+  }
+
+  setOutcome(outcome: "success" | "error" | "timeout"): this {
+    this.event.outcome = outcome;
+    return this;
+  }
+
+  setError(error: WorkflowEvent["error"]): this {
+    this.event.error = error;
+    this.event.outcome = "error";
+    return this;
+  }
+
+  setTask(task: WorkflowEvent["task"]): this {
+    this.event.task = task;
+    return this;
+  }
+
+  setResult(result: WorkflowEvent["result"]): this {
+    this.event.result = result;
+    return this;
+  }
+
+  setMetadata(metadata: Record<string, unknown>): this {
+    this.event.metadata = { ...this.event.metadata, ...metadata };
+    return this;
+  }
+
+  startPhase(name: keyof NonNullable<WorkflowEvent["phases"]>): this {
+    this.phaseTimers.set(name, Date.now());
+    return this;
+  }
+
+  endPhase(name: keyof NonNullable<WorkflowEvent["phases"]>): this {
+    const start = this.phaseTimers.get(name);
+    if (start) {
+      const duration = Date.now() - start;
+      this.event.phases = { ...this.event.phases, [name]: duration };
+      this.phaseTimers.delete(name);
+    }
+    return this;
+  }
+
+  finalize(): WorkflowEvent {
+    this.event.durationMs = Date.now() - this.startTime;
+    return this.event;
+  }
+}
+
+/**
+ * Telemetry service interface
+ */
+export interface TelemetryServiceInterface {
+  /**
+   * Emit a wide event for a tool call
+   */
+  readonly emitToolCall: (event: ToolCallEvent) => Effect.Effect<void>;
+
+  /**
+   * Emit a wide event for workflow execution
+   */
+  readonly emitWorkflow: (event: WorkflowEvent) => Effect.Effect<void>;
+
+  /**
+   * Create a builder for tool call events
+   */
+  readonly toolCallBuilder: (
+    tool: string,
+    requestId: string
+  ) => ToolCallEventBuilder;
+
+  /**
+   * Create a builder for workflow events
+   */
+  readonly workflowBuilder: (
+    workflowId: string,
+    runId: string,
+    sessionId: string
+  ) => WorkflowEventBuilder;
+}
+
+/**
+ * Create telemetry service
+ *
+ * Currently logs to Effect's logging system which outputs to console.
+ * In production, this could be extended to send to:
+ * - Axiom, Datadog, or other observability platforms
+ * - Cloudflare Analytics Engine
+ * - A queue for async processing
+ */
+export const makeTelemetryService = (): TelemetryServiceInterface => ({
+  emitToolCall: (event) =>
+    Effect.log("tool_call").pipe(
+      Effect.annotateLogs(event as unknown as Record<string, unknown>)
+    ),
+
+  emitWorkflow: (event) =>
+    Effect.log("workflow_execution").pipe(
+      Effect.annotateLogs(event as unknown as Record<string, unknown>)
+    ),
+
+  toolCallBuilder: (tool, requestId) => new ToolCallEventBuilder(tool, requestId),
+
+  workflowBuilder: (workflowId, runId, sessionId) =>
+    new WorkflowEventBuilder(workflowId, runId, sessionId),
+});
+
+/**
+ * Telemetry service context tag
+ */
+export class TelemetryService extends Context.Tag("@sandbox-mcp/TelemetryService")<
+  TelemetryService,
+  TelemetryServiceInterface
+>() {}
+
+/**
+ * Telemetry service layer
+ */
+export const TelemetryLive: Layer.Layer<TelemetryService> = Layer.succeed(
+  TelemetryService,
+  makeTelemetryService()
+);
