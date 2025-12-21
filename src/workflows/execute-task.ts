@@ -66,10 +66,11 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     const deps = this.getDeps();
 
     // Create telemetry event builder
+    // Constructor: (workflowId, runId, sessionId)
     const telemetry = new WorkflowEventBuilder(
-      params.runId,
-      params.sessionId,
-      params.task.slice(0, 100)
+      event.instanceId,   // workflowId - the workflow instance ID
+      params.runId,       // runId - our run tracking ID
+      params.sessionId    // sessionId
     );
 
     try {

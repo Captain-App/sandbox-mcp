@@ -176,7 +176,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       "opencode_create_session",
       {
         description: "Create or resume an OpenCode coding session in a sandbox",
-        inputSchema: createSessionInputSchema.shape,
+        inputSchema: createSessionInputSchema,
       },
       async (params: CreateSessionInput) => {
         const telemetry = new ToolCallEventBuilder(
@@ -279,7 +279,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       "opencode_run_task",
       {
         description: "Execute a coding task asynchronously in an OpenCode session",
-        inputSchema: runTaskInputSchema.shape,
+        inputSchema: runTaskInputSchema,
       },
       async (params: RunTaskInput) => {
         const telemetry = new ToolCallEventBuilder(
@@ -413,7 +413,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       "opencode_get_status",
       {
         description: "Check the status of a session and optionally a specific task run",
-        inputSchema: getStatusInputSchema.shape,
+        inputSchema: getStatusInputSchema,
       },
       async (params: GetStatusInput) => {
         const telemetry = new ToolCallEventBuilder(

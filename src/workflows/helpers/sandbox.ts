@@ -12,12 +12,13 @@ export function getSandbox(
 ): Sandbox<unknown> {
   return cfGetSandbox(deps.sandboxBinding, sandboxId, {
     normalizeId: true,
-    sleepAfter: "10 minutes",
+    sleepAfter: "10m", // Use abbreviated format: "10m" not "10 minutes"
   });
 }
 
 /**
  * Mount R2 storage at /workspace using s3fs
+ * Note: Session isolation is provided by the sandbox itself (each session = unique sandboxId)
  */
 export async function mountR2Storage(
   sandbox: Sandbox<unknown>,
@@ -30,8 +31,11 @@ export async function mountR2Storage(
 
   const { accountId, accessKeyId, secretAccessKey } = r2Config;
 
+  // Mount the R2 bucket at /workspace
+  // Each sandbox has its own isolated filesystem, so we use sessionId as bucket subdirectory
+  // Format: "bucket:/path" mounts that path prefix from the bucket
   await sandbox.mountBucket(
-    `opencode-sessions:/${sessionId}/workspace`,
+    `opencode-sessions:/${sessionId}`,
     "/workspace",
     {
       endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
