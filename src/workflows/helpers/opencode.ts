@@ -1,28 +1,53 @@
 // src/workflows/helpers/opencode.ts
-import { createOpencode } from "@cloudflare/sandbox/opencode";
-import type { OpencodeClient } from "@opencode-ai/sdk";
 import type { Sandbox } from "@cloudflare/sandbox";
+import { createOpencode } from "@cloudflare/sandbox/opencode";
+import type { Config, OpencodeClient } from "@opencode-ai/sdk";
+
 import type {
-  TaskParams,
-  OpenCodeTaskResult,
-  OpenCodeSessionListResponse,
-  OpenCodeSessionCreateResponse,
   OpenCodePromptResponse,
+  OpenCodeSessionCreateResponse,
+  OpenCodeSessionListResponse,
+  OpenCodeTaskResult,
+  TaskParams,
 } from "./types";
 
 /**
+ * Build OpenCode config that uses the proxy for API calls.
+ *
+ * The JWT token is passed as the API key, and the baseURL points to our proxy.
+ * The proxy validates the JWT and injects the real ANTHROPIC_API_KEY.
+ */
+function buildProxyConfig(proxyBaseUrl: string, proxyToken: string): Config {
+  return {
+    provider: {
+      anthropic: {
+        options: {
+          apiKey: proxyToken,
+          baseURL: `${proxyBaseUrl}/proxy/anthropic`,
+        },
+      },
+    },
+  };
+}
+
+/**
  * Execute an OpenCode task inside the sandbox.
- * Starts OpenCode server, creates/gets session, executes task.
+ *
+ * Starts OpenCode server with proxy configuration, creates/gets session,
+ * and executes the task. All API calls go through the proxy.
  */
 export async function executeTask(
   sandbox: Sandbox<unknown>,
   params: TaskParams,
 ): Promise<OpenCodeTaskResult> {
+  // Build proxy-based config
+  const config = buildProxyConfig(params.proxyBaseUrl, params.proxyToken);
+
   // Start OpenCode server in the sandbox and get SDK client
   const { client, server } = await createOpencode<OpencodeClient>(sandbox, {
     port: 4096,
     directory: "/workspace",
-    config: params.opencodeConfig,
+    config,
   });
 
   try {

@@ -3,21 +3,23 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+
+import { isSessionError, isStorageError } from "../models/errors";
+import type { RunRecord } from "../models/run";
+import type { SessionMetadata } from "../models/session";
+import { createProxyToken } from "../proxy";
+import { makeStorageLayer, StorageService, type SqlStorageInterface } from "../services/storage";
+import { ToolCallEventBuilder } from "../services/telemetry";
 import {
   createSessionInputSchema,
-  runTaskInputSchema,
-  getStatusInputSchema,
-  formatToolResponse,
   formatErrorResponse,
+  formatToolResponse,
+  getStatusInputSchema,
+  runTaskInputSchema,
   type CreateSessionInput,
-  type RunTaskInput,
   type GetStatusInput,
+  type RunTaskInput,
 } from "./tools";
-import { StorageService, makeStorageLayer, type SqlStorageInterface } from "../services/storage";
-import { isSessionError, isStorageError } from "../models/errors";
-import type { SessionMetadata } from "../models/session";
-import type { RunRecord } from "../models/run";
-import { ToolCallEventBuilder } from "../services/telemetry";
 
 /**
  * State managed by the MCP Agent
@@ -299,12 +301,27 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           }
 
           telemetry.endPhase("validate");
-          telemetry.startPhase("workflow");
+          telemetry.startPhase("token");
 
           const runId = `run-${crypto.randomUUID().slice(0, 8)}`;
           const doId = this.agentContext.ctx.id.toString();
 
+          // Create proxy token for zero-trust authentication
+          // The token is passed to the workflow instead of real credentials
+          const proxyToken = await rt.runPromise(
+            createProxyToken({
+              secret: this.env.PROXY_JWT_SECRET,
+              sandboxId: session.value.sandboxId,
+              sessionId: params.sessionId,
+              expiresIn: "2h", // Long enough for task execution
+            }),
+          );
+
+          telemetry.endPhase("token");
+          telemetry.startPhase("workflow");
+
           // Create workflow to execute task
+          // Note: Only JWT token is passed, not real credentials
           const workflowInstance = await this.env.EXECUTE_TASK_WORKFLOW.create({
             id: runId,
             params: {
@@ -316,15 +333,8 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               doId,
               repositoryUrl: session.value.repository?.url,
               branch: session.value.repository?.branch,
-              opencodeConfig: {
-                provider: {
-                  anthropic: {
-                    options: {
-                      apiKey: this.env.ANTHROPIC_API_KEY,
-                    },
-                  },
-                },
-              },
+              proxyToken,
+              proxyBaseUrl: this.env.PROXY_BASE_URL,
             },
           });
 

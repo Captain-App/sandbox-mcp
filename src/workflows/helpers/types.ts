@@ -1,8 +1,10 @@
 // src/workflows/helpers/types.ts
-import type { Config } from "@opencode-ai/sdk";
 
 /**
- * Parameters for task execution workflow
+ * Parameters for task execution workflow.
+ *
+ * Uses proxy tokens instead of real credentials for zero-trust security.
+ * The proxy validates JWT tokens and injects real credentials.
  */
 export interface TaskParams {
   sessionId: string;
@@ -13,10 +15,15 @@ export interface TaskParams {
   doId: string; // Durable Object ID for RPC callback
   repositoryUrl?: string;
   branch?: string;
-  // OpenCode config with provider API keys
-  opencodeConfig?: Config;
-  // Git credentials for authenticated operations
-  githubToken?: string;
+  /**
+   * JWT proxy token for authenticated API calls.
+   * Used for Anthropic, GitHub, and R2 access through the proxy.
+   */
+  proxyToken: string;
+  /**
+   * Base URL of the proxy (e.g., 'https://sandbox-mcp.workers.dev')
+   */
+  proxyBaseUrl: string;
 }
 
 /**
@@ -41,8 +48,10 @@ export interface McpAgentStub {
 
 /**
  * Dependencies required by workflow helpers.
- * Explicit deps rather than implicit env access.
- * Uses `unknown` for DO generics to accept any binding type.
+ *
+ * Simplified for zero-trust model - no secrets needed here.
+ * All authentication is handled by the proxy using JWT tokens
+ * passed in TaskParams.
  */
 export interface WorkflowDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,12 +59,6 @@ export interface WorkflowDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mcpAgentBinding: DurableObjectNamespace<any>;
   sessionsBucket: R2Bucket;
-  r2Config?: {
-    accountId: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-  };
-  githubToken?: string;
 }
 
 /**

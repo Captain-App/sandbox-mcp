@@ -30,22 +30,16 @@ import {
  */
 export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
   /**
-   * Build workflow dependencies from env
+   * Build workflow dependencies from env.
+   *
+   * Note: No secrets here - all authentication is handled by the proxy
+   * using JWT tokens passed in TaskParams.
    */
   private getDeps(): WorkflowDeps {
     return {
       sandboxBinding: this.env.Sandbox,
       mcpAgentBinding: this.env.MCP_AGENT,
       sessionsBucket: this.env.SESSIONS_BUCKET,
-      r2Config:
-        this.env.R2_ACCOUNT_ID && this.env.R2_ACCESS_KEY_ID && this.env.R2_SECRET_ACCESS_KEY
-          ? {
-              accountId: this.env.R2_ACCOUNT_ID,
-              accessKeyId: this.env.R2_ACCESS_KEY_ID,
-              secretAccessKey: this.env.R2_SECRET_ACCESS_KEY,
-            }
-          : undefined,
-      githubToken: this.env.GITHUB_TOKEN,
     };
   }
 
@@ -62,14 +56,28 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     );
 
     try {
-      // Step 1: Mount R2 storage for workspace persistence
+      // Step 1: Configure sandbox to use proxy for all external services
+      // This sets up Anthropic SDK and git to route through our zero-trust proxy
+      await step.do("configure-proxy", async () => {
+        const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
+        await Sandbox.configureSandboxProxy(sandbox, params.proxyBaseUrl, params.proxyToken);
+        await Sandbox.setupGitConfig(sandbox);
+        return { configured: true };
+      });
+
+      // Step 2: Mount R2 storage for workspace persistence (via proxy)
       await step.do("mount-storage", async () => {
         const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-        await Sandbox.mountR2Storage(sandbox, params.sessionId, deps.r2Config);
+        await Sandbox.mountR2Storage(
+          sandbox,
+          params.sessionId,
+          params.proxyBaseUrl,
+          params.proxyToken,
+        );
         return { mounted: true };
       });
 
-      // Step 2: Restore OpenCode session state from backup
+      // Step 3: Restore OpenCode session state from backup
       const restoreResult = await step.do("restore-session", async () => {
         const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
         const restored = await Backup.restoreSession(
@@ -81,14 +89,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       });
       telemetry.setMetadata({ sessionRestored: restoreResult.restored });
 
-      // Step 3: Set up git credentials
-      await step.do("setup-git-credentials", async () => {
-        const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-        await Sandbox.setupGitCredentials(sandbox, deps.githubToken);
-        return { configured: true };
-      });
-
-      // Step 4: Clone repository if needed
+      // Step 4: Clone repository if needed (git uses proxy for auth)
       if (params.repositoryUrl) {
         await step.do("clone-repository", async () => {
           const sandbox = Sandbox.getSandbox(deps, params.sandboxId);

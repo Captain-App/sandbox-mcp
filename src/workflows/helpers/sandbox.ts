@@ -1,5 +1,7 @@
 // src/workflows/helpers/sandbox.ts
 import { getSandbox as cfGetSandbox, type Sandbox } from "@cloudflare/sandbox";
+
+import { configureAnthropic, configureGithub, configureR2 } from "../../proxy";
 import type { WorkflowDeps } from "./types";
 
 /**
@@ -13,63 +15,50 @@ export function getSandbox(deps: WorkflowDeps, sandboxId: string): Sandbox<unkno
 }
 
 /**
- * Mount R2 storage at /workspace using s3fs
- * Note: Session isolation is provided by the sandbox itself (each session = unique sandboxId)
+ * Configure sandbox to use proxy for all external services.
+ *
+ * This sets up:
+ * - Anthropic SDK to use proxy (via environment variables)
+ * - Git to use proxy for github.com operations (via URL rewriting)
+ *
+ * After calling this, the sandbox can make authenticated API calls
+ * without having access to real credentials.
+ */
+export async function configureSandboxProxy(
+  sandbox: Sandbox<unknown>,
+  proxyBaseUrl: string,
+  proxyToken: string,
+): Promise<void> {
+  await configureAnthropic(sandbox, proxyBaseUrl, proxyToken);
+  await configureGithub(sandbox, proxyBaseUrl, proxyToken);
+}
+
+/**
+ * Mount R2 storage via proxy (credentials never enter sandbox).
+ *
+ * Uses s3fs with the proxy as the S3 endpoint. The JWT token is used
+ * as the access key ID, which the proxy extracts and validates.
  */
 export async function mountR2Storage(
   sandbox: Sandbox<unknown>,
   sessionId: string,
-  r2Config: WorkflowDeps["r2Config"],
+  proxyBaseUrl: string,
+  proxyToken: string,
 ): Promise<void> {
-  if (!r2Config) {
-    return;
-  }
+  const bucket = "opencode-sessions";
+  const mountPath = "/workspace";
 
-  const { accountId, accessKeyId, secretAccessKey } = r2Config;
-
-  // Mount the R2 bucket at /workspace
-  // Each sandbox has its own isolated filesystem, so we use sessionId as bucket subdirectory
-  // Format: "bucket:/path" mounts that path prefix from the bucket
-  await sandbox.mountBucket(`opencode-sessions:/${sessionId}`, "/workspace", {
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId,
-      secretAccessKey,
-    },
-  });
+  await configureR2(sandbox, proxyBaseUrl, proxyToken, `${bucket}/${sessionId}`, mountPath);
 }
 
 /**
- * Set up git credentials for authenticated operations.
- * Uses environment variables instead of writing to disk for security.
+ * Set up basic git configuration (user info for commits).
+ * Authentication is handled by the proxy via configureGithub().
  */
-export async function setupGitCredentials(
-  sandbox: Sandbox<unknown>,
-  githubToken?: string,
-): Promise<void> {
-  if (!githubToken) {
-    return;
-  }
-
-  // Set environment variables for git operations
-  await sandbox.setEnvVars({
-    GIT_ASKPASS: "echo",
-    GIT_TERMINAL_PROMPT: "0",
-    GH_TOKEN: githubToken,
-    GITHUB_TOKEN: githubToken,
-  });
-
-  // Configure git credential helper using environment variable
-  await sandbox.exec(
-    `git config --global credential.helper '!f() { echo "password=$GITHUB_TOKEN"; }; f'`,
-  );
-
+export async function setupGitConfig(sandbox: Sandbox<unknown>): Promise<void> {
   // Set git user info for commits
   await sandbox.exec(`git config --global user.email "opencode@sandbox.workers.dev"`);
   await sandbox.exec(`git config --global user.name "OpenCode Bot"`);
-
-  // Check GH CLI auth status (silent)
-  await sandbox.exec(`gh auth status 2>/dev/null || true`);
 }
 
 /**

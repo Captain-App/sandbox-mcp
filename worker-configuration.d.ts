@@ -27,6 +27,12 @@ declare global {
 		R2_SECRET_ACCESS_KEY: string;
 		ANTHROPIC_API_KEY: string;
 		GITHUB_TOKEN?: string;
+
+		// Proxy configuration
+		PROXY_JWT_SECRET: string;
+		PROXY_BASE_URL: string;
+		/** R2 S3-compatible endpoint URL, e.g., https://{account_id}.r2.cloudflarestorage.com */
+		R2_ENDPOINT: string;
 	}
 }
 
