@@ -499,6 +499,20 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
+   * Ensure runtime is initialized.
+   * Used for RPC methods that may be called before init().
+   */
+  private ensureRuntime(): ManagedRuntime.ManagedRuntime<StorageService, never> {
+    if (this.runtime === null) {
+      // Lazily initialize runtime for RPC calls that happen before init()
+      const sql = this.agentContext.ctx.storage.sql;
+      const storage = makeStorageLayer(sql);
+      this.runtime = ManagedRuntime.make(storage);
+    }
+    return this.runtime;
+  }
+
+  /**
    * RPC method called by Workflow when task completes
    * @public Called via DO RPC from ExecuteTaskWorkflow
    */
@@ -514,7 +528,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       branch?: string;
     };
   }): Promise<void> {
-    const rt = getRuntime(this.runtime);
+    // Use ensureRuntime() instead of getRuntime() since RPC calls
+    // may arrive before init() is called (e.g., when DO is woken from cold state)
+    const rt = this.ensureRuntime();
 
     await rt.runPromise(
       Effect.gen(function* () {

@@ -18,7 +18,7 @@ import type { ServiceConfig } from "../types";
  * Expects the JWT token in the `x-api-key` header (standard Anthropic header).
  */
 export const anthropic: ServiceConfig<Env> = {
-  target: "https://api.anthropic.com",
+  target: "https://api.anthropic.com/v1",
 
   validate: (req) => req.headers.get("x-api-key"),
 
