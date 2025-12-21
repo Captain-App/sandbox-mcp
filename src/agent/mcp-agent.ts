@@ -3,12 +3,16 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import { z } from "zod";
 import {
   createSessionInputSchema,
   runTaskInputSchema,
   getStatusInputSchema,
   formatToolResponse,
   formatErrorResponse,
+  type CreateSessionInput,
+  type RunTaskInput,
+  type GetStatusInput,
 } from "./tools";
 import {
   StorageService,
@@ -22,12 +26,26 @@ import {
 } from "../models/errors";
 import type { SessionMetadata } from "../models/session";
 import type { RunRecord } from "../models/run";
+import { ToolCallEventBuilder } from "../services/telemetry";
 
 /**
  * State managed by the MCP Agent
  */
 interface AgentState {
   initialized: boolean;
+}
+
+/**
+ * Extended context type for accessing Durable Object internals
+ * The McpAgent extends Agent which has ctx but TypeScript types don't expose sql
+ */
+interface AgentContext {
+  ctx: {
+    id: DurableObjectId;
+    storage: {
+      sql: SqlStorageInterface;
+    };
+  };
 }
 
 /**
@@ -55,7 +73,9 @@ function getRuntime(
 /**
  * Format error for MCP response, preserving domain error information
  */
-function formatDomainError(error: unknown): ReturnType<typeof formatErrorResponse> {
+function formatDomainError(
+  error: unknown
+): ReturnType<typeof formatErrorResponse> {
   // Check for domain-specific errors and use their tags
   if (isSessionError(error)) {
     return formatErrorResponse({
@@ -75,7 +95,7 @@ function formatDomainError(error: unknown): ReturnType<typeof formatErrorRespons
       message: error.message,
     });
   }
-  
+
   // Fallback for unknown errors
   return formatErrorResponse({
     code: "UNKNOWN_ERROR",
@@ -100,13 +120,20 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     null;
 
   /**
+   * Access the Durable Object context with proper typing
+   */
+  private get agentContext(): AgentContext {
+    // McpAgent extends Agent which has ctx property
+    // We use a type assertion here because the SDK types don't expose sql
+    return this as unknown as AgentContext;
+  }
+
+  /**
    * Initialize the MCP server with tools
    */
   async init(): Promise<void> {
     // Access SQL storage from the Durable Object state
-    // McpAgent extends Agent which has access to ctx (DurableObjectState)
-    const sql = (this as unknown as { ctx: DurableObjectState }).ctx.storage
-      .sql as SqlStorageInterface;
+    const sql = this.agentContext.ctx.storage.sql;
 
     // Initialize SQLite schema
     const storage = makeStorageLayer(sql);
@@ -119,7 +146,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       })
     );
 
-    // Register tools
+    // Register tools using the recommended registerTool() method
     this.registerCreateSessionTool();
     this.registerRunTaskTool();
     this.registerGetStatusTool();
@@ -128,18 +155,49 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
+   * Emit telemetry for a tool call
+   */
+  private emitToolTelemetry(
+    builder: ToolCallEventBuilder,
+    success: boolean
+  ): void {
+    if (success) {
+      builder.setOutcome("success");
+    }
+    const event = builder.finalize();
+    console.log(
+      JSON.stringify({
+        level: success ? "info" : "error",
+        type: "tool.call",
+        ...event,
+      })
+    );
+  }
+
+  /**
    * Tool: opencode_create_session
+   * Uses registerTool() with proper Zod schema format
    */
   private registerCreateSessionTool(): void {
-    this.server.tool(
+    this.server.registerTool(
       "opencode_create_session",
-      "Create or resume an OpenCode coding session in a sandbox",
-      createSessionInputSchema.shape,
-      async (params) => {
+      {
+        description: "Create or resume an OpenCode coding session in a sandbox",
+        inputSchema: createSessionInputSchema.shape,
+      },
+      async (params: CreateSessionInput) => {
+        const telemetry = new ToolCallEventBuilder(
+          "opencode_create_session",
+          params.sessionId ?? "new"
+        );
+        telemetry.startPhase("validate");
+
         try {
           const rt = getRuntime(this.runtime);
-          const sessionId =
-            params.sessionId ?? crypto.randomUUID().slice(0, 8);
+          const sessionId = params.sessionId ?? crypto.randomUUID().slice(0, 8);
+
+          telemetry.endPhase("validate");
+          telemetry.startPhase("storage");
 
           // Check if session exists (resume)
           const existing = await rt.runPromise(
@@ -150,6 +208,8 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           );
 
           if (existing._tag === "Some") {
+            telemetry.setMetadata({ action: "resume" });
+            this.emitToolTelemetry(telemetry, true);
             return formatToolResponse({
               sessionId: existing.value.sessionId,
               sandboxId: existing.value.sandboxId,
@@ -161,22 +221,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           }
 
           // Create session metadata
-          // The web UI URL points to our proxy endpoint which will wake the sandbox
-          // and forward requests to OpenCode. The actual sandbox setup happens lazily
-          // when the first task runs or when the user visits the web UI.
-          //
-          // URL pattern: /session/{sessionId}/ - handled by the web UI proxy in index.ts
-          // Note: In production, this should use the actual worker URL
           const webUiUrl = `/session/${sessionId}/`;
 
-          // Note: sessionId is a plain string here (from params or generated),
-          // the branded SessionId type is for the domain model validation
           const session: SessionMetadata = {
             sessionId: sessionId as SessionMetadata["sessionId"],
-            sandboxId: sessionId, // 1:1 mapping between session and sandbox
+            sandboxId: sessionId,
             createdAt: Date.now(),
             lastActivity: Date.now(),
-            status: "idle", // Session is ready but sandbox starts lazily
+            status: "idle",
             workspacePath: "/workspace",
             webUiUrl,
             repository: params.repositoryUrl
@@ -198,6 +250,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             })
           );
 
+          telemetry.endPhase("storage");
+          telemetry.setMetadata({ action: "create" });
+          this.emitToolTelemetry(telemetry, true);
+
           return formatToolResponse({
             sessionId: session.sessionId,
             sandboxId: session.sandboxId,
@@ -207,6 +263,15 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             repository: session.repository,
           });
         } catch (error) {
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
           return formatDomainError(error);
         }
       }
@@ -217,11 +282,19 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
    * Tool: opencode_run_task
    */
   private registerRunTaskTool(): void {
-    this.server.tool(
+    this.server.registerTool(
       "opencode_run_task",
-      "Execute a coding task asynchronously in an OpenCode session",
-      runTaskInputSchema.shape,
-      async (params) => {
+      {
+        description: "Execute a coding task asynchronously in an OpenCode session",
+        inputSchema: runTaskInputSchema.shape,
+      },
+      async (params: RunTaskInput) => {
+        const telemetry = new ToolCallEventBuilder(
+          "opencode_run_task",
+          params.sessionId
+        );
+        telemetry.startPhase("validate");
+
         try {
           const rt = getRuntime(this.runtime);
 
@@ -234,20 +307,26 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           );
 
           if (session._tag === "None") {
+            telemetry.setError({
+              type: "SessionNotFoundError",
+              code: "SESSION_NOT_FOUND",
+              message: `Session "${params.sessionId}" not found`,
+              retriable: false,
+            });
+            this.emitToolTelemetry(telemetry, false);
             return formatErrorResponse({
               code: "SESSION_NOT_FOUND",
               message: `Session "${params.sessionId}" not found`,
             });
           }
 
+          telemetry.endPhase("validate");
+          telemetry.startPhase("workflow");
+
           const runId = `run-${crypto.randomUUID().slice(0, 8)}`;
+          const doId = this.agentContext.ctx.id.toString();
 
-          // Get the DO ID for RPC callback
-          const doId = (
-            this as unknown as { ctx: DurableObjectState }
-          ).ctx.id.toString();
-
-          // Create workflow to execute task with OpenCode config
+          // Create workflow to execute task
           const workflowInstance = await this.env.EXECUTE_TASK_WORKFLOW.create({
             id: runId,
             params: {
@@ -259,7 +338,6 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               doId,
               repositoryUrl: session.value.repository?.url,
               branch: session.value.repository?.branch,
-              // Pass OpenCode config with Anthropic API key
               opencodeConfig: {
                 provider: {
                   anthropic: {
@@ -272,7 +350,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             },
           });
 
-          // Create run record with workflow ID
+          telemetry.endPhase("workflow");
+          telemetry.startPhase("storage");
+
+          // Create run record
           const run: RunRecord = {
             runId,
             sessionId: params.sessionId,
@@ -304,6 +385,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             })
           );
 
+          telemetry.endPhase("storage");
+          telemetry.setMetadata({ runId, workflowId: workflowInstance.id });
+          this.emitToolTelemetry(telemetry, true);
+
           return formatToolResponse({
             runId,
             workflowId: workflowInstance.id,
@@ -312,6 +397,15 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             message: "Task started. Use opencode_get_status to check progress.",
           });
         } catch (error) {
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
           return formatDomainError(error);
         }
       }
@@ -322,11 +416,19 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
    * Tool: opencode_get_status
    */
   private registerGetStatusTool(): void {
-    this.server.tool(
+    this.server.registerTool(
       "opencode_get_status",
-      "Check the status of a session and optionally a specific task run",
-      getStatusInputSchema.shape,
-      async (params) => {
+      {
+        description: "Check the status of a session and optionally a specific task run",
+        inputSchema: getStatusInputSchema.shape,
+      },
+      async (params: GetStatusInput) => {
+        const telemetry = new ToolCallEventBuilder(
+          "opencode_get_status",
+          params.sessionId
+        );
+        telemetry.startPhase("storage");
+
         try {
           const rt = getRuntime(this.runtime);
 
@@ -338,6 +440,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           );
 
           if (session._tag === "None") {
+            telemetry.setError({
+              type: "SessionNotFoundError",
+              code: "SESSION_NOT_FOUND",
+              message: `Session "${params.sessionId}" not found`,
+              retriable: false,
+            });
+            this.emitToolTelemetry(telemetry, false);
             return formatErrorResponse({
               code: "SESSION_NOT_FOUND",
               message: `Session "${params.sessionId}" not found`,
@@ -367,6 +476,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             }
           }
 
+          telemetry.endPhase("storage");
+          telemetry.setMetadata({ runsCount: runs.length });
+          this.emitToolTelemetry(telemetry, true);
+
           return formatToolResponse({
             sessionId: session.value.sessionId,
             webUiUrl: session.value.webUiUrl,
@@ -385,6 +498,15 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             ...(currentRun && { currentRun }),
           });
         } catch (error) {
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
           return formatDomainError(error);
         }
       }
@@ -407,7 +529,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     };
   }): Promise<void> {
     const rt = getRuntime(this.runtime);
-    
+
     await rt.runPromise(
       Effect.gen(function* () {
         const storage = yield* StorageService;
