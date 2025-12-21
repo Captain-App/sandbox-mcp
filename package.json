@@ -13,17 +13,19 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"effect": "^3.19.0",
-		"agents": "^0.2.32",
+		"@cloudflare/sandbox": "^0.6.7",
 		"@modelcontextprotocol/sdk": "^1.0.0",
+		"@opencode-ai/sdk": "^1.0.184",
+		"agents": "^0.2.32",
+		"effect": "^3.19.0",
 		"zod": "^3.24.0"
 	},
 	"devDependencies": {
-		"@cloudflare/workers-types": "^4.20241218.0",
 		"@cloudflare/vitest-pool-workers": "^0.11.1",
+		"@cloudflare/workers-types": "^4.20241218.0",
+		"oxlint": "^0.16.0",
 		"typescript": "^5.7.2",
 		"vitest": "^2.1.8",
-		"wrangler": "^3.99.0",
-		"oxlint": "^0.16.0"
+		"wrangler": "^3.99.0"
 	}
 }
