@@ -1,8 +1,10 @@
 // src/index.ts
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
+import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 
-// Export Durable Object class
+// Export Durable Object and Workflow classes
 export { OpenCodeMcpAgent };
+export { ExecuteTaskWorkflow };
 
 // Worker fetch handler
 export default {
