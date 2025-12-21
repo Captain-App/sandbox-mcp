@@ -175,12 +175,31 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
           const runId = `run-${crypto.randomUUID().slice(0, 8)}`;
 
-          // TODO: Create workflow to execute task
-          // For now, create run record only
+          // Get the DO ID for RPC callback
+          const doId = (
+            this as unknown as { ctx: DurableObjectState }
+          ).ctx.id.toString();
+
+          // Create workflow to execute task
+          const workflowInstance = await this.env.EXECUTE_TASK_WORKFLOW.create({
+            id: runId,
+            params: {
+              sessionId: params.sessionId,
+              sandboxId: session.value.sandboxId,
+              task: params.task,
+              model: params.model ?? session.value.config.defaultModel,
+              runId,
+              doId,
+              repositoryUrl: session.value.repository?.url,
+              branch: session.value.repository?.branch,
+            },
+          });
+
+          // Create run record with workflow ID
           const run: RunRecord = {
             runId,
             sessionId: params.sessionId,
-            workflowId: `wf-${runId}`, // Placeholder
+            workflowId: workflowInstance.id,
             status: "queued",
             task: params.task,
             model: params.model ?? session.value.config.defaultModel,
@@ -196,8 +215,21 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             })
           );
 
+          // Update session last activity
+          await this.runtime!.runPromise(
+            Effect.gen(function* () {
+              const storage = yield* StorageService;
+              yield* storage.putSession({
+                ...session.value,
+                lastActivity: Date.now(),
+                status: "active",
+              });
+            })
+          );
+
           return formatToolResponse({
             runId,
+            workflowId: workflowInstance.id,
             status: "started",
             webUiUrl: session.value.webUiUrl,
             message: "Task started. Use opencode_get_status to check progress.",
