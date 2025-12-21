@@ -10,8 +10,7 @@ export const GITHUB_URL_PREFIX = "https://github.com/";
 /**
  * Valid session status values
  */
-export const SessionStatus = Schema.Literal("creating", "active", "idle", "stopped", "error");
-export type SessionStatus = typeof SessionStatus.Type;
+const SessionStatus = Schema.Literal("creating", "active", "idle", "stopped", "error");
 
 /**
  * Session ID must be lowercase alphanumeric with hyphens, max 64 chars

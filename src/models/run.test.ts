@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Schema } from "effect";
-import { RunRecord, RunStatus, RunResult } from "./run";
+import { RunRecord } from "./run";
 
 describe("Run Model", () => {
 	it("should parse valid run record", () => {

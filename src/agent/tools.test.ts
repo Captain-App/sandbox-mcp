@@ -1,10 +1,9 @@
 // src/agent/tools.test.ts
 import { describe, it, expect } from "vitest";
-import { 
-  createSessionInputSchema, 
-  runTaskInputSchema, 
-  getStatusInputSchema,
-  formatToolResponse 
+import {
+  createSessionInputSchema,
+  runTaskInputSchema,
+  formatToolResponse
 } from "./tools";
 
 describe("MCP Tool Schemas", () => {

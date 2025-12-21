@@ -3,7 +3,6 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
-import { z } from "zod";
 import {
   createSessionInputSchema,
   runTaskInputSchema,

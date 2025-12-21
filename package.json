@@ -11,7 +11,8 @@
 		"test:watch": "vitest",
 		"lint": "oxlint",
 		"typecheck": "tsc --noEmit",
-		"knip": "knip"
+		"knip": "knip",
+		"check": "npm run typecheck && npm run lint && npm run knip && npm run test"
 	},
 	"dependencies": {
 		"@cloudflare/sandbox": "^0.6.7",

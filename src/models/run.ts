@@ -8,13 +8,12 @@ export const TASK_MAX_LENGTH = 50000;
 /**
  * Valid run status values
  */
-export const RunStatus = Schema.Literal("queued", "running", "completed", "failed", "retrying");
-export type RunStatus = typeof RunStatus.Type;
+const RunStatus = Schema.Literal("queued", "running", "completed", "failed", "retrying");
 
 /**
  * Result of a completed run
  */
-export const RunResult = Schema.Struct({
+const RunResult = Schema.Struct({
 	success: Schema.Boolean,
 	output: Schema.optional(Schema.String),
 	error: Schema.optional(Schema.String),
@@ -23,7 +22,6 @@ export const RunResult = Schema.Struct({
 	commits: Schema.Array(Schema.String),
 	branch: Schema.optional(Schema.String),
 });
-export type RunResult = typeof RunResult.Type;
 
 /**
  * Complete run record stored in DO

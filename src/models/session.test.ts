@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Schema } from "effect";
-import { SessionMetadata, SessionStatus } from "./session";
+import { SessionMetadata } from "./session";
 
 describe("Session Model", () => {
 	it("should parse valid session metadata", () => {
