@@ -83,7 +83,7 @@ export type GetStatusInput = z.infer<typeof getStatusInputSchema>;
 /**
  * MCP tool response type - uses index signature for SDK compatibility
  */
-export interface ToolResponse {
+interface ToolResponse {
   [key: string]: unknown;
   content: Array<{
     type: "text";

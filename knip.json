@@ -3,10 +3,7 @@
   "entry": ["src/index.ts"],
   "project": ["src/**/*.ts"],
   "ignore": ["src/**/*.test.ts"],
-  "ignoreExportsUsedInFile": {
-    "interface": true,
-    "type": true
-  },
+  "includeEntryExports": true,
   "ignoreDependencies": [
     "cloudflare"
   ],

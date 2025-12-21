@@ -21,7 +21,7 @@ export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundErro
 	}
 }
 
-export type SessionError = SessionNotFoundError;
+type SessionError = SessionNotFoundError;
 
 export const isSessionError = (u: unknown): u is SessionError =>
 	Predicate.hasProperty(u, SessionErrorTypeId);
@@ -50,7 +50,7 @@ export class StorageWriteError extends Schema.TaggedError<StorageWriteError>()("
 	}
 }
 
-export type StorageError = StorageReadError | StorageWriteError;
+type StorageError = StorageReadError | StorageWriteError;
 
 export const isStorageError = (u: unknown): u is StorageError =>
 	Predicate.hasProperty(u, StorageErrorTypeId);

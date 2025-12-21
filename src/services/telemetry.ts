@@ -12,7 +12,7 @@
 /**
  * Wide event structure for MCP tool calls
  */
-export interface ToolCallEvent {
+interface ToolCallEvent {
   // Identifiers
   timestamp: string;
   requestId: string;

@@ -12,7 +12,7 @@ export type SqlStorageInterface = SqlStorage;
 /**
  * Storage service interface
  */
-export interface StorageServiceInterface {
+interface StorageServiceInterface {
 	readonly getSession: (
 		sessionId: string,
 	) => Effect.Effect<Option.Option<SessionMetadata>, StorageReadError>;
