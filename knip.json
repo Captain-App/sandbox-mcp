@@ -1,5 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/index.ts"],
+  "project": ["src/**/*.ts"],
+  "ignore": ["src/**/*.test.ts"],
   "ignoreExportsUsedInFile": {
     "interface": true,
     "type": true
@@ -7,7 +10,10 @@
   "ignoreDependencies": [
     "cloudflare"
   ],
-  "tags": [
-    "-lintignore"
-  ]
+  "wrangler": {
+    "config": ["wrangler.jsonc"]
+  },
+  "vitest": {
+    "entry": ["src/**/*.test.ts"]
+  }
 }
