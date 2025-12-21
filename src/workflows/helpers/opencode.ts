@@ -5,12 +5,54 @@ import type { Config, OpencodeClient } from "@opencode-ai/sdk";
 
 import { toContainerUrl } from "../../proxy";
 import type {
+  OpenCodePart,
   OpenCodePromptResponse,
   OpenCodeSessionCreateResponse,
   OpenCodeSessionListResponse,
   OpenCodeTaskResult,
   TaskParams,
 } from "./types";
+
+/**
+ * Extract meaningful content from OpenCode response parts.
+ *
+ * Extracts:
+ * - Text parts: The AI's explanations and summaries
+ * - Tool outputs: Results from bash commands, file reads, etc.
+ */
+function extractResponseContent(parts: OpenCodePart[]): {
+  textOutput: string;
+  toolOutputs: Array<{ tool: string; title?: string; output?: string }>;
+} {
+  const textParts: string[] = [];
+  const toolOutputs: Array<{ tool: string; title?: string; output?: string }> = [];
+
+  for (const part of parts) {
+    if (part.type === "text" && part.text) {
+      textParts.push(part.text);
+    } else if (part.type === "tool" && part.tool && part.state) {
+      // Only include completed tool calls with output
+      if (part.state.status === "completed" && part.state.output) {
+        toolOutputs.push({
+          tool: part.tool,
+          title: part.state.title,
+          output: part.state.output,
+        });
+      } else if (part.state.status === "error" && part.state.error) {
+        toolOutputs.push({
+          tool: part.tool,
+          title: part.state.title,
+          output: `Error: ${part.state.error}`,
+        });
+      }
+    }
+  }
+
+  return {
+    textOutput: textParts.join("\n\n"),
+    toolOutputs,
+  };
+}
 
 /**
  * Build OpenCode config that uses the proxy for API calls.
@@ -100,22 +142,38 @@ export async function executeTask(
       },
     })) as OpenCodePromptResponse;
 
-    // Extract text from response
-    const textParts =
-      response?.data?.parts?.filter((p) => p.type === "text")?.map((p) => p.text ?? "") ?? [];
+    // Extract meaningful output from response
+    const { textOutput, toolOutputs } = extractResponseContent(response?.data?.parts ?? []);
+
+    // Check for errors in the response
+    if (response?.data?.info?.error) {
+      return {
+        success: false,
+        output: textOutput,
+        toolOutputs,
+        error: response.data.info.error.data.message,
+        filesCreated: [],
+        filesModified: [],
+        commits: [],
+        tokens: response.data.info.tokens,
+      };
+    }
 
     return {
       success: true,
-      output: textParts.join("\n"),
+      output: textOutput,
+      toolOutputs,
       filesCreated: [],
       filesModified: [],
       commits: [],
       branch: undefined,
+      tokens: response?.data?.info?.tokens,
     };
   } catch (error) {
     return {
       success: false,
       output: "",
+      toolOutputs: [],
       error: error instanceof Error ? error.message : String(error),
       filesCreated: [],
       filesModified: [],

@@ -521,11 +521,21 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     result: {
       success: boolean;
       output?: string;
+      toolOutputs?: Array<{
+        tool: string;
+        title?: string;
+        output?: string;
+      }>;
       error?: string;
       filesCreated: string[];
       filesModified: string[];
       commits: string[];
       branch?: string;
+      tokens?: {
+        input: number;
+        output: number;
+        reasoning: number;
+      };
     };
   }): Promise<void> {
     // Use ensureRuntime() instead of getRuntime() since RPC calls

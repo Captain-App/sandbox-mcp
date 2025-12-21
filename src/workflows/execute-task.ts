@@ -138,11 +138,13 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       const result: TaskResult = {
         success: taskResult.success,
         output: taskResult.output,
+        toolOutputs: taskResult.toolOutputs,
         error: taskResult.error,
         filesCreated: taskResult.filesCreated,
         filesModified: gitInfo.filesModified,
         commits: gitInfo.commits,
         branch: gitInfo.branch,
+        tokens: taskResult.tokens,
       };
 
       // Step 8: Notify DO via RPC callback

@@ -31,12 +31,25 @@ export interface TaskParams {
  */
 export interface TaskResult {
   success: boolean;
+  /** Summary text from the AI's response */
   output?: string;
+  /** Detailed tool outputs (bash commands, file edits, etc.) */
+  toolOutputs?: Array<{
+    tool: string;
+    title?: string;
+    output?: string;
+  }>;
   error?: string;
   filesCreated: string[];
   filesModified: string[];
   commits: string[];
   branch?: string;
+  /** Token usage from the LLM */
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning: number;
+  };
 }
 
 /**
@@ -81,9 +94,50 @@ export interface OpenCodeSessionCreateResponse {
   data?: { id: string };
 }
 
+/**
+ * Tool state in OpenCode response
+ */
+interface OpenCodeToolState {
+  status: "pending" | "running" | "completed" | "error";
+  input?: Record<string, unknown>;
+  output?: string;
+  title?: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Part types in OpenCode response
+ */
+export interface OpenCodePart {
+  type: string;
+  text?: string;
+  tool?: string;
+  state?: OpenCodeToolState;
+}
+
+/**
+ * Assistant message info
+ */
+interface OpenCodeAssistantInfo {
+  id: string;
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning: number;
+  };
+  cost?: number;
+  finish?: string;
+  error?: {
+    name: string;
+    data: { message: string };
+  };
+}
+
 export interface OpenCodePromptResponse {
   data?: {
-    parts?: Array<{ type: string; text?: string }>;
+    info?: OpenCodeAssistantInfo;
+    parts?: OpenCodePart[];
   };
 }
 
@@ -92,10 +146,23 @@ export interface OpenCodePromptResponse {
  */
 export interface OpenCodeTaskResult {
   success: boolean;
+  /** Summary text from the AI's response */
   output: string;
+  /** Detailed tool outputs (bash commands, file edits, etc.) */
+  toolOutputs: Array<{
+    tool: string;
+    title?: string;
+    output?: string;
+  }>;
   error?: string;
   filesCreated: string[];
   filesModified: string[];
   commits: string[];
   branch?: string;
+  /** Token usage from the LLM */
+  tokens?: {
+    input: number;
+    output: number;
+    reasoning: number;
+  };
 }
