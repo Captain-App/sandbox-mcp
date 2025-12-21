@@ -9,7 +9,6 @@ import type { WorkflowDeps } from "./types";
 export function getSandbox(deps: WorkflowDeps, sandboxId: string): Sandbox<unknown> {
 	return cfGetSandbox(deps.sandboxBinding, sandboxId, {
 		normalizeId: true,
-		sleepAfter: "10m", // Use abbreviated format: "10m" not "10 minutes"
 	});
 }
 

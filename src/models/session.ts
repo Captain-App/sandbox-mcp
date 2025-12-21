@@ -2,8 +2,11 @@ import { Schema } from "effect";
 
 /**
  * Shared validation constants - used by both Effect Schema and Zod schemas
+ * Session ID: alphanumeric with hyphens, no leading/trailing hyphens
+ * Allows: "abc", "a", "abc-123", "my-session-1"
+ * Disallows: "-abc", "abc-", "ABC" (uppercase), "ab--cd" (consecutive hyphens)
  */
-export const SESSION_ID_PATTERN = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+export const SESSION_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export const SESSION_ID_MAX_LENGTH = 64;
 export const GITHUB_URL_PREFIX = "https://github.com/";
 
