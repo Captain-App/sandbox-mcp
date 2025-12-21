@@ -55,10 +55,18 @@ function parseProxyPath(pathname: string, mountPath: string): { service: string;
 
 /**
  * Build the target URL for the proxied request.
+ *
+ * Uses URL API with relative path resolution. The path must NOT start with "/"
+ * because absolute paths replace the entire base path:
+ *   new URL("/messages", "https://api.anthropic.com/v1/") → .../messages (wrong!)
+ *   new URL("messages", "https://api.anthropic.com/v1/")  → .../v1/messages (correct!)
  */
 function buildTargetUrl(targetBase: string, path: string, query: string): URL {
-  const base = targetBase.replace(/\/$/, "");
-  const url = new URL(path, `${base}/`);
+  // Ensure base ends with "/" for proper URL resolution
+  const base = targetBase.endsWith("/") ? targetBase : `${targetBase}/`;
+  // Make path relative (remove leading "/") so URL resolution appends rather than replaces
+  const relativePath = path.startsWith("/") ? path.slice(1) : path;
+  const url = new URL(relativePath, base);
   url.search = query;
   return url;
 }

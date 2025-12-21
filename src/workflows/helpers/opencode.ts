@@ -170,52 +170,11 @@ export async function executeTask(
       tokens: response?.data?.info?.tokens,
     };
   } catch (error) {
-    // Extract detailed error information from various error formats
-    let errorMessage = error instanceof Error ? error.message : String(error);
-
-    // Check for SDK-style errors with response data
-    if (error && typeof error === "object") {
-      const errorObj = error as Record<string, unknown>;
-
-      // SDK errors often have response property
-      if ("response" in errorObj && errorObj.response) {
-        const response = errorObj.response as Record<string, unknown>;
-        if (response.status) {
-          errorMessage = `HTTP ${response.status}: ${errorMessage}`;
-        }
-      }
-
-      // Check for error.data pattern
-      if ("data" in errorObj && errorObj.data) {
-        const data = errorObj.data as Record<string, unknown>;
-        if (data.message) {
-          errorMessage = String(data.message);
-        }
-        if (data.error) {
-          errorMessage = String(data.error);
-        }
-      }
-
-      // Check for error.error pattern (nested)
-      if ("error" in errorObj && errorObj.error) {
-        const nestedError = errorObj.error as Record<string, unknown>;
-        if (nestedError.message) {
-          errorMessage = String(nestedError.message);
-        }
-      }
-    }
-
-    console.error("OpenCode task error:", {
-      error: errorMessage,
-      raw: JSON.stringify(error, null, 2),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-
     return {
       success: false,
       output: "",
       toolOutputs: [],
-      error: errorMessage,
+      error: error instanceof Error ? error.message : String(error),
       filesCreated: [],
       filesModified: [],
       commits: [],
