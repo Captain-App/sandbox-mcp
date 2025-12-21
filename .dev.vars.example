@@ -1,0 +1,7 @@
+PROXY_JWT_SECRET=dev-secret
+PROXY_BASE_URL=http://localhost:8787
+ANTHROPIC_API_KEY=sk-ant-xxx
+GITHUB_TOKEN=ghp_xxx
+R2_ACCESS_KEY_ID=xxx
+R2_SECRET_ACCESS_KEY=xxx
+R2_ENDPOINT=https://xxx.r2.cloudflarestorage.com
