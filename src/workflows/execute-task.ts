@@ -1,7 +1,16 @@
 // src/workflows/execute-task.ts
-import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
-import { WorkflowEventBuilder, type WorkflowEvent as TelemetryEvent } from '../services/telemetry';
-import { type TaskParams, type TaskResult, type McpAgentStub, type WorkflowDeps, Sandbox, OpenCode, Backup, Git } from './helpers';
+import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
+import { WorkflowEventBuilder, type WorkflowEvent as TelemetryEvent } from "../services/telemetry";
+import {
+	type TaskParams,
+	type TaskResult,
+	type McpAgentStub,
+	type WorkflowDeps,
+	Sandbox,
+	OpenCode,
+	Backup,
+	Git,
+} from "./helpers";
 
 /**
  * Workflow that executes OpenCode tasks durably inside Cloudflare Sandboxes.
@@ -54,22 +63,26 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
 		try {
 			// Step 1: Mount R2 storage for workspace persistence
-			await step.do('mount-storage', async () => {
+			await step.do("mount-storage", async () => {
 				const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
 				await Sandbox.mountR2Storage(sandbox, params.sessionId, deps.r2Config);
 				return { mounted: true };
 			});
 
 			// Step 2: Restore OpenCode session state from backup
-			const restoreResult = await step.do('restore-session', async () => {
+			const restoreResult = await step.do("restore-session", async () => {
 				const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-				const restored = await Backup.restoreSession(sandbox, params.sessionId, deps.sessionsBucket);
+				const restored = await Backup.restoreSession(
+					sandbox,
+					params.sessionId,
+					deps.sessionsBucket,
+				);
 				return { restored };
 			});
 			telemetry.setMetadata({ sessionRestored: restoreResult.restored });
 
 			// Step 3: Set up git credentials
-			await step.do('setup-git-credentials', async () => {
+			await step.do("setup-git-credentials", async () => {
 				const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
 				await Sandbox.setupGitCredentials(sandbox, deps.githubToken);
 				return { configured: true };
@@ -77,7 +90,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
 			// Step 4: Clone repository if needed
 			if (params.repositoryUrl) {
-				await step.do('clone-repository', async () => {
+				await step.do("clone-repository", async () => {
 					const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
 					await Sandbox.cloneRepository(sandbox, params.repositoryUrl!, params.branch);
 					return { cloned: true };
@@ -86,14 +99,14 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
 			// Step 5: Start OpenCode and execute task
 			const taskResult = await step.do(
-				'execute-opencode-task',
+				"execute-opencode-task",
 				{
 					retries: {
 						limit: 3,
-						delay: '10 seconds',
-						backoff: 'exponential',
+						delay: "10 seconds",
+						backoff: "exponential",
 					},
-					timeout: '50 minutes',
+					timeout: "50 minutes",
 				},
 				async () => {
 					const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
@@ -102,14 +115,14 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 			);
 
 			// Step 6: Backup session state to R2
-			await step.do('backup-session', async () => {
+			await step.do("backup-session", async () => {
 				const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
 				await Backup.backupSession(sandbox, params.sessionId, deps.sessionsBucket);
 				return { backedUp: true };
 			});
 
 			// Step 7: Get git status for the result
-			const gitInfo = await step.do('get-git-status', async () => {
+			const gitInfo = await step.do("get-git-status", async () => {
 				const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
 				return Git.getStatus(sandbox);
 			});
@@ -125,25 +138,25 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 			};
 
 			// Step 8: Notify DO via RPC callback
-			await step.do('notify-completion', async () => {
+			await step.do("notify-completion", async () => {
 				await this.notifyCompletion(deps, params.doId, params.runId, result);
 				return { notified: true };
 			});
 
 			// Emit success telemetry
-			telemetry.setOutcome('success');
+			telemetry.setOutcome("success");
 			this.emitTelemetry(telemetry.finalize());
 
 			return result;
 		} catch (error) {
 			// Record error in telemetry
-			const errorName = error instanceof Error ? error.name : 'UnknownError';
+			const errorName = error instanceof Error ? error.name : "UnknownError";
 			const errorMessage = error instanceof Error ? error.message : String(error);
 			telemetry.setError({
 				type: errorName,
 				code: errorName,
 				message: errorMessage,
-				phase: 'execution',
+				phase: "execution",
 				retriable: true,
 			});
 			this.emitTelemetry(telemetry.finalize());
@@ -157,7 +170,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 				commits: [],
 			};
 
-			await step.do('notify-failure', async () => {
+			await step.do("notify-failure", async () => {
 				await this.notifyCompletion(deps, params.doId, params.runId, errorResult);
 				return { notified: true };
 			});
@@ -172,8 +185,8 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 	private emitTelemetry(event: TelemetryEvent): void {
 		console.log(
 			JSON.stringify({
-				level: event.error ? 'error' : 'info',
-				type: 'workflow.event',
+				level: event.error ? "error" : "info",
+				type: "workflow.event",
 				...event,
 			}),
 		);
@@ -182,7 +195,12 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 	/**
 	 * Notify the MCP Agent DO of task completion via RPC
 	 */
-	private async notifyCompletion(deps: WorkflowDeps, doId: string, runId: string, result: TaskResult): Promise<void> {
+	private async notifyCompletion(
+		deps: WorkflowDeps,
+		doId: string,
+		runId: string,
+		result: TaskResult,
+	): Promise<void> {
 		// Use unknown binding to avoid TypeScript infinite type instantiation
 		const binding = deps.mcpAgentBinding as unknown as DurableObjectNamespace;
 		const doIdObj = binding.idFromString(doId);

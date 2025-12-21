@@ -1,16 +1,19 @@
-import { Schema } from 'effect';
-import * as Predicate from 'effect/Predicate';
+import { Schema } from "effect";
+import * as Predicate from "effect/Predicate";
 
 // Type ID for error identification
-export const SessionErrorTypeId: unique symbol = Symbol.for('@sandbox-mcp/SessionError');
+export const SessionErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/SessionError");
 export type SessionErrorTypeId = typeof SessionErrorTypeId;
 
-export const StorageErrorTypeId: unique symbol = Symbol.for('@sandbox-mcp/StorageError');
+export const StorageErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/StorageError");
 export type StorageErrorTypeId = typeof StorageErrorTypeId;
 
 // --- Session Errors ---
 
-export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundError>()('SessionNotFoundError', { sessionId: Schema.String }) {
+export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundError>()(
+	"SessionNotFoundError",
+	{ sessionId: Schema.String },
+) {
 	/** @public Used by isSessionError type guard */
 	readonly [SessionErrorTypeId]: SessionErrorTypeId = SessionErrorTypeId;
 
@@ -21,11 +24,12 @@ export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundErro
 
 type SessionError = SessionNotFoundError;
 
-export const isSessionError = (u: unknown): u is SessionError => Predicate.hasProperty(u, SessionErrorTypeId);
+export const isSessionError = (u: unknown): u is SessionError =>
+	Predicate.hasProperty(u, SessionErrorTypeId);
 
 // --- Storage Errors ---
 
-export class StorageReadError extends Schema.TaggedError<StorageReadError>()('StorageReadError', {
+export class StorageReadError extends Schema.TaggedError<StorageReadError>()("StorageReadError", {
 	key: Schema.String,
 	cause: Schema.String,
 }) {
@@ -37,10 +41,13 @@ export class StorageReadError extends Schema.TaggedError<StorageReadError>()('St
 	}
 }
 
-export class StorageWriteError extends Schema.TaggedError<StorageWriteError>()('StorageWriteError', {
-	key: Schema.String,
-	cause: Schema.String,
-}) {
+export class StorageWriteError extends Schema.TaggedError<StorageWriteError>()(
+	"StorageWriteError",
+	{
+		key: Schema.String,
+		cause: Schema.String,
+	},
+) {
 	/** @public Used by isStorageError type guard */
 	readonly [StorageErrorTypeId]: StorageErrorTypeId = StorageErrorTypeId;
 
@@ -51,4 +58,5 @@ export class StorageWriteError extends Schema.TaggedError<StorageWriteError>()('
 
 type StorageError = StorageReadError | StorageWriteError;
 
-export const isStorageError = (u: unknown): u is StorageError => Predicate.hasProperty(u, StorageErrorTypeId);
+export const isStorageError = (u: unknown): u is StorageError =>
+	Predicate.hasProperty(u, StorageErrorTypeId);

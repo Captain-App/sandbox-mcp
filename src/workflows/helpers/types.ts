@@ -1,5 +1,5 @@
 // src/workflows/helpers/types.ts
-import type { Config } from '@opencode-ai/sdk';
+import type { Config } from "@opencode-ai/sdk";
 
 /**
  * Parameters for task execution workflow

@@ -19,7 +19,7 @@ interface ToolCallEvent {
 	tool: string;
 
 	// Service info
-	service: 'sandbox-mcp';
+	service: "sandbox-mcp";
 	version: string;
 
 	// Timing
@@ -27,7 +27,7 @@ interface ToolCallEvent {
 	phases?: Record<string, number>; // phase name -> duration in ms
 
 	// Outcome
-	outcome: 'success' | 'error';
+	outcome: "success" | "error";
 
 	// Error details (if outcome === "error")
 	error?: {
@@ -52,14 +52,14 @@ export interface WorkflowEvent {
 	sessionId: string;
 
 	// Service info
-	service: 'sandbox-mcp';
+	service: "sandbox-mcp";
 	version: string;
 
 	// Timing
 	durationMs?: number;
 
 	// Outcome
-	outcome: 'success' | 'error' | 'timeout';
+	outcome: "success" | "error" | "timeout";
 
 	// Error details
 	error?: {
@@ -88,20 +88,20 @@ export class ToolCallEventBuilder {
 			tool,
 			requestId,
 			timestamp: new Date().toISOString(),
-			service: 'sandbox-mcp',
-			version: '1.0.0',
-			outcome: 'success',
+			service: "sandbox-mcp",
+			version: "1.0.0",
+			outcome: "success",
 		};
 	}
 
-	setOutcome(outcome: 'success' | 'error'): this {
+	setOutcome(outcome: "success" | "error"): this {
 		this.event.outcome = outcome;
 		return this;
 	}
 
-	setError(error: ToolCallEvent['error']): this {
+	setError(error: ToolCallEvent["error"]): this {
 		this.event.error = error;
-		this.event.outcome = 'error';
+		this.event.outcome = "error";
 		return this;
 	}
 
@@ -145,20 +145,20 @@ export class WorkflowEventBuilder {
 			runId,
 			sessionId,
 			timestamp: new Date().toISOString(),
-			service: 'sandbox-mcp',
-			version: '1.0.0',
-			outcome: 'success',
+			service: "sandbox-mcp",
+			version: "1.0.0",
+			outcome: "success",
 		};
 	}
 
-	setOutcome(outcome: 'success' | 'error' | 'timeout'): this {
+	setOutcome(outcome: "success" | "error" | "timeout"): this {
 		this.event.outcome = outcome;
 		return this;
 	}
 
-	setError(error: WorkflowEvent['error']): this {
+	setError(error: WorkflowEvent["error"]): this {
 		this.event.error = error;
-		this.event.outcome = 'error';
+		this.event.outcome = "error";
 		return this;
 	}
 

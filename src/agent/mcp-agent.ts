@@ -1,8 +1,8 @@
 // src/agent/mcp-agent.ts
-import { McpAgent } from 'agents/mcp';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import * as Effect from 'effect/Effect';
-import * as ManagedRuntime from 'effect/ManagedRuntime';
+import { McpAgent } from "agents/mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as Effect from "effect/Effect";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import {
 	createSessionInputSchema,
 	runTaskInputSchema,
@@ -12,12 +12,12 @@ import {
 	type CreateSessionInput,
 	type RunTaskInput,
 	type GetStatusInput,
-} from './tools';
-import { StorageService, makeStorageLayer, type SqlStorageInterface } from '../services/storage';
-import { isSessionError, isStorageError } from '../models/errors';
-import type { SessionMetadata } from '../models/session';
-import type { RunRecord } from '../models/run';
-import { ToolCallEventBuilder } from '../services/telemetry';
+} from "./tools";
+import { StorageService, makeStorageLayer, type SqlStorageInterface } from "../services/storage";
+import { isSessionError, isStorageError } from "../models/errors";
+import type { SessionMetadata } from "../models/session";
+import type { RunRecord } from "../models/run";
+import { ToolCallEventBuilder } from "../services/telemetry";
 
 /**
  * State managed by the MCP Agent
@@ -44,8 +44,8 @@ interface AgentContext {
  */
 class RuntimeNotInitializedError extends Error {
 	constructor() {
-		super('MCP Agent runtime not initialized. Call init() first.');
-		this.name = 'RuntimeNotInitializedError';
+		super("MCP Agent runtime not initialized. Call init() first.");
+		this.name = "RuntimeNotInitializedError";
 	}
 }
 
@@ -81,7 +81,7 @@ function formatDomainError(error: unknown): ReturnType<typeof formatErrorRespons
 
 	// Fallback for unknown errors
 	return formatErrorResponse({
-		code: 'UNKNOWN_ERROR',
+		code: "UNKNOWN_ERROR",
 		message: error instanceof Error ? error.message : String(error),
 	});
 }
@@ -91,8 +91,8 @@ function formatDomainError(error: unknown): ReturnType<typeof formatErrorRespons
  */
 export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 	server = new McpServer({
-		name: 'opencode-sandbox',
-		version: '1.0.0',
+		name: "opencode-sandbox",
+		version: "1.0.0",
 	});
 
 	/** @public Required by McpAgent base class */
@@ -143,13 +143,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 	 */
 	private emitToolTelemetry(builder: ToolCallEventBuilder, success: boolean): void {
 		if (success) {
-			builder.setOutcome('success');
+			builder.setOutcome("success");
 		}
 		const event = builder.finalize();
 		console.log(
 			JSON.stringify({
-				level: success ? 'info' : 'error',
-				type: 'tool.call',
+				level: success ? "info" : "error",
+				type: "tool.call",
 				...event,
 			}),
 		);
@@ -161,21 +161,24 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 	 */
 	private registerCreateSessionTool(): void {
 		this.server.registerTool(
-			'opencode_create_session',
+			"opencode_create_session",
 			{
-				description: 'Create or resume an OpenCode coding session in a sandbox',
+				description: "Create or resume an OpenCode coding session in a sandbox",
 				inputSchema: createSessionInputSchema,
 			},
 			async (params: CreateSessionInput) => {
-				const telemetry = new ToolCallEventBuilder('opencode_create_session', params.sessionId ?? 'new');
-				telemetry.startPhase('validate');
+				const telemetry = new ToolCallEventBuilder(
+					"opencode_create_session",
+					params.sessionId ?? "new",
+				);
+				telemetry.startPhase("validate");
 
 				try {
 					const rt = getRuntime(this.runtime);
 					const sessionId = params.sessionId ?? crypto.randomUUID().slice(0, 8);
 
-					telemetry.endPhase('validate');
-					telemetry.startPhase('storage');
+					telemetry.endPhase("validate");
+					telemetry.startPhase("storage");
 
 					// Check if session exists (resume)
 					const existing = await rt.runPromise(
@@ -185,14 +188,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 						}),
 					);
 
-					if (existing._tag === 'Some') {
-						telemetry.setMetadata({ action: 'resume' });
+					if (existing._tag === "Some") {
+						telemetry.setMetadata({ action: "resume" });
 						this.emitToolTelemetry(telemetry, true);
 						return formatToolResponse({
 							sessionId: existing.value.sessionId,
 							sandboxId: existing.value.sandboxId,
 							webUiUrl: existing.value.webUiUrl,
-							status: 'resumed',
+							status: "resumed",
 							workspacePath: existing.value.workspacePath,
 							repository: existing.value.repository,
 						});
@@ -202,22 +205,22 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 					const webUiUrl = `/session/${sessionId}/`;
 
 					const session: SessionMetadata = {
-						sessionId: sessionId as SessionMetadata['sessionId'],
+						sessionId: sessionId as SessionMetadata["sessionId"],
 						sandboxId: sessionId,
 						createdAt: Date.now(),
 						lastActivity: Date.now(),
-						status: 'idle',
-						workspacePath: '/workspace',
+						status: "idle",
+						workspacePath: "/workspace",
 						webUiUrl,
 						repository: params.repositoryUrl
 							? {
 									url: params.repositoryUrl,
-									branch: params.branch ?? 'main',
+									branch: params.branch ?? "main",
 								}
 							: undefined,
 						title: params.title,
 						config: {
-							defaultModel: 'claude-sonnet-4-20250514',
+							defaultModel: "claude-sonnet-4-20250514",
 						},
 					};
 
@@ -228,20 +231,20 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 						}),
 					);
 
-					telemetry.endPhase('storage');
-					telemetry.setMetadata({ action: 'create' });
+					telemetry.endPhase("storage");
+					telemetry.setMetadata({ action: "create" });
 					this.emitToolTelemetry(telemetry, true);
 
 					return formatToolResponse({
 						sessionId: session.sessionId,
 						sandboxId: session.sandboxId,
 						webUiUrl: session.webUiUrl,
-						status: 'created',
+						status: "created",
 						workspacePath: session.workspacePath,
 						repository: session.repository,
 					});
 				} catch (error) {
-					const errorName = error instanceof Error ? error.name : 'UnknownError';
+					const errorName = error instanceof Error ? error.name : "UnknownError";
 					const errorMessage = error instanceof Error ? error.message : String(error);
 					telemetry.setError({
 						type: errorName,
@@ -261,14 +264,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 	 */
 	private registerRunTaskTool(): void {
 		this.server.registerTool(
-			'opencode_run_task',
+			"opencode_run_task",
 			{
-				description: 'Execute a coding task asynchronously in an OpenCode session',
+				description: "Execute a coding task asynchronously in an OpenCode session",
 				inputSchema: runTaskInputSchema,
 			},
 			async (params: RunTaskInput) => {
-				const telemetry = new ToolCallEventBuilder('opencode_run_task', params.sessionId);
-				telemetry.startPhase('validate');
+				const telemetry = new ToolCallEventBuilder("opencode_run_task", params.sessionId);
+				telemetry.startPhase("validate");
 
 				try {
 					const rt = getRuntime(this.runtime);
@@ -281,22 +284,22 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 						}),
 					);
 
-					if (session._tag === 'None') {
+					if (session._tag === "None") {
 						telemetry.setError({
-							type: 'SessionNotFoundError',
-							code: 'SESSION_NOT_FOUND',
+							type: "SessionNotFoundError",
+							code: "SESSION_NOT_FOUND",
 							message: `Session "${params.sessionId}" not found`,
 							retriable: false,
 						});
 						this.emitToolTelemetry(telemetry, false);
 						return formatErrorResponse({
-							code: 'SESSION_NOT_FOUND',
+							code: "SESSION_NOT_FOUND",
 							message: `Session "${params.sessionId}" not found`,
 						});
 					}
 
-					telemetry.endPhase('validate');
-					telemetry.startPhase('workflow');
+					telemetry.endPhase("validate");
+					telemetry.startPhase("workflow");
 
 					const runId = `run-${crypto.randomUUID().slice(0, 8)}`;
 					const doId = this.agentContext.ctx.id.toString();
@@ -325,15 +328,15 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 						},
 					});
 
-					telemetry.endPhase('workflow');
-					telemetry.startPhase('storage');
+					telemetry.endPhase("workflow");
+					telemetry.startPhase("storage");
 
 					// Create run record
 					const run: RunRecord = {
 						runId,
 						sessionId: params.sessionId,
 						workflowId: workflowInstance.id,
-						status: 'queued',
+						status: "queued",
 						task: params.task,
 						model: params.model ?? session.value.config.defaultModel,
 						startedAt: Date.now(),
@@ -355,24 +358,24 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 							yield* storage.putSession({
 								...session.value,
 								lastActivity: Date.now(),
-								status: 'active',
+								status: "active",
 							});
 						}),
 					);
 
-					telemetry.endPhase('storage');
+					telemetry.endPhase("storage");
 					telemetry.setMetadata({ runId, workflowId: workflowInstance.id });
 					this.emitToolTelemetry(telemetry, true);
 
 					return formatToolResponse({
 						runId,
 						workflowId: workflowInstance.id,
-						status: 'started',
+						status: "started",
 						webUiUrl: session.value.webUiUrl,
-						message: 'Task started. Use opencode_get_status to check progress.',
+						message: "Task started. Use opencode_get_status to check progress.",
 					});
 				} catch (error) {
-					const errorName = error instanceof Error ? error.name : 'UnknownError';
+					const errorName = error instanceof Error ? error.name : "UnknownError";
 					const errorMessage = error instanceof Error ? error.message : String(error);
 					telemetry.setError({
 						type: errorName,
@@ -392,14 +395,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 	 */
 	private registerGetStatusTool(): void {
 		this.server.registerTool(
-			'opencode_get_status',
+			"opencode_get_status",
 			{
-				description: 'Check the status of a session and optionally a specific task run',
+				description: "Check the status of a session and optionally a specific task run",
 				inputSchema: getStatusInputSchema,
 			},
 			async (params: GetStatusInput) => {
-				const telemetry = new ToolCallEventBuilder('opencode_get_status', params.sessionId);
-				telemetry.startPhase('storage');
+				const telemetry = new ToolCallEventBuilder("opencode_get_status", params.sessionId);
+				telemetry.startPhase("storage");
 
 				try {
 					const rt = getRuntime(this.runtime);
@@ -411,16 +414,16 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 						}),
 					);
 
-					if (session._tag === 'None') {
+					if (session._tag === "None") {
 						telemetry.setError({
-							type: 'SessionNotFoundError',
-							code: 'SESSION_NOT_FOUND',
+							type: "SessionNotFoundError",
+							code: "SESSION_NOT_FOUND",
 							message: `Session "${params.sessionId}" not found`,
 							retriable: false,
 						});
 						this.emitToolTelemetry(telemetry, false);
 						return formatErrorResponse({
-							code: 'SESSION_NOT_FOUND',
+							code: "SESSION_NOT_FOUND",
 							message: `Session "${params.sessionId}" not found`,
 						});
 					}
@@ -443,12 +446,12 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 								return yield* storage.getRun(runId);
 							}),
 						);
-						if (run._tag === 'Some') {
+						if (run._tag === "Some") {
 							currentRun = run.value;
 						}
 					}
 
-					telemetry.endPhase('storage');
+					telemetry.endPhase("storage");
 					telemetry.setMetadata({ runsCount: runs.length });
 					this.emitToolTelemetry(telemetry, true);
 
@@ -463,14 +466,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 						recentRuns: runs.map((r) => ({
 							runId: r.runId,
 							status: r.status,
-							task: r.task.slice(0, 100) + (r.task.length > 100 ? '...' : ''),
+							task: r.task.slice(0, 100) + (r.task.length > 100 ? "..." : ""),
 							startedAt: r.startedAt,
 							completedAt: r.completedAt,
 						})),
 						...(currentRun && { currentRun }),
 					});
 				} catch (error) {
-					const errorName = error instanceof Error ? error.name : 'UnknownError';
+					const errorName = error instanceof Error ? error.name : "UnknownError";
 					const errorMessage = error instanceof Error ? error.message : String(error);
 					telemetry.setError({
 						type: errorName,
@@ -508,10 +511,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 				const storage = yield* StorageService;
 				const existing = yield* storage.getRun(params.runId);
 
-				if (existing._tag === 'Some') {
+				if (existing._tag === "Some") {
 					const updated: RunRecord = {
 						...existing.value,
-						status: params.result.success ? 'completed' : 'failed',
+						status: params.result.success ? "completed" : "failed",
 						completedAt: Date.now(),
 						result: params.result,
 					};

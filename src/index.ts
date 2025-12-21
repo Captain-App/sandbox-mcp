@@ -1,12 +1,12 @@
 // src/index.ts
-import { OpenCodeMcpAgent } from './agent/mcp-agent';
-import { ExecuteTaskWorkflow } from './workflows/execute-task';
-import { getSandbox } from '@cloudflare/sandbox';
-import { createOpencodeServer, proxyToOpencode } from '@cloudflare/sandbox/opencode';
-import type { Config } from '@opencode-ai/sdk';
+import { OpenCodeMcpAgent } from "./agent/mcp-agent";
+import { ExecuteTaskWorkflow } from "./workflows/execute-task";
+import { getSandbox } from "@cloudflare/sandbox";
+import { createOpencodeServer, proxyToOpencode } from "@cloudflare/sandbox/opencode";
+import type { Config } from "@opencode-ai/sdk";
 
 // Export Sandbox class from @cloudflare/sandbox (required for containers)
-export { Sandbox } from '@cloudflare/sandbox';
+export { Sandbox } from "@cloudflare/sandbox";
 
 // Export Durable Object and Workflow classes
 export { OpenCodeMcpAgent };
@@ -33,13 +33,13 @@ export default {
 		const url = new URL(request.url);
 
 		// Health check
-		if (url.pathname === '/health') {
-			return new Response('OK', { status: 200 });
+		if (url.pathname === "/health") {
+			return new Response("OK", { status: 200 });
 		}
 
 		// MCP endpoint - route to McpAgent
-		if (url.pathname.startsWith('/mcp')) {
-			return OpenCodeMcpAgent.serve('/mcp').fetch(request, env, ctx);
+		if (url.pathname.startsWith("/mcp")) {
+			return OpenCodeMcpAgent.serve("/mcp").fetch(request, env, ctx);
 		}
 
 		// Web UI proxy - /session/{sessionId}/* routes to OpenCode web UI
@@ -56,23 +56,23 @@ export default {
 
 				// Start OpenCode server if not already running
 				const server = await createOpencodeServer(sandbox, {
-					directory: '/workspace',
+					directory: "/workspace",
 					config: getOpencodeConfig(env),
 				});
 
 				// Proxy the request to OpenCode's web UI
 				return proxyToOpencode(request, sandbox, server);
 			} catch (error) {
-				console.error('Web UI proxy error:', error);
+				console.error("Web UI proxy error:", error);
 				return new Response(
 					JSON.stringify({
-						error: 'Failed to connect to session',
+						error: "Failed to connect to session",
 						message: error instanceof Error ? error.message : String(error),
 						sessionId,
 					}),
 					{
 						status: 500,
-						headers: { 'Content-Type': 'application/json' },
+						headers: { "Content-Type": "application/json" },
 					},
 				);
 			}
@@ -81,16 +81,16 @@ export default {
 		// Default response
 		return new Response(
 			JSON.stringify({
-				name: 'sandbox-mcp',
-				version: '1.0.0',
+				name: "sandbox-mcp",
+				version: "1.0.0",
 				endpoints: {
-					health: '/health',
-					mcp: '/mcp',
-					webUi: '/session/{sessionId}/',
+					health: "/health",
+					mcp: "/mcp",
+					webUi: "/session/{sessionId}/",
 				},
 			}),
 			{
-				headers: { 'Content-Type': 'application/json' },
+				headers: { "Content-Type": "application/json" },
 			},
 		);
 	},

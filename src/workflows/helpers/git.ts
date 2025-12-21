@@ -1,6 +1,6 @@
 // src/workflows/helpers/git.ts
-import type { Sandbox } from '@cloudflare/sandbox';
-import type { GitStatus } from './types';
+import type { Sandbox } from "@cloudflare/sandbox";
+import type { GitStatus } from "./types";
 
 /**
  * Get git status information from the workspace
@@ -8,26 +8,32 @@ import type { GitStatus } from './types';
 export async function getStatus(sandbox: Sandbox<unknown>): Promise<GitStatus> {
 	try {
 		// Get current branch
-		const branchResult = await sandbox.exec('git -C /workspace rev-parse --abbrev-ref HEAD 2>/dev/null || echo main');
+		const branchResult = await sandbox.exec(
+			"git -C /workspace rev-parse --abbrev-ref HEAD 2>/dev/null || echo main",
+		);
 
 		// Get recent commits (just the short hashes)
-		const logResult = await sandbox.exec("git -C /workspace log --oneline -5 2>/dev/null || echo ''");
+		const logResult = await sandbox.exec(
+			"git -C /workspace log --oneline -5 2>/dev/null || echo ''",
+		);
 
 		// Get changed files
-		const diffResult = await sandbox.exec("git -C /workspace diff --name-only HEAD~1 2>/dev/null || echo ''");
+		const diffResult = await sandbox.exec(
+			"git -C /workspace diff --name-only HEAD~1 2>/dev/null || echo ''",
+		);
 
 		return {
 			branch: branchResult.stdout.trim(),
 			commits: logResult.stdout
 				.trim()
-				.split('\n')
+				.split("\n")
 				.filter(Boolean)
-				.map((l) => l.split(' ')[0]),
-			filesModified: diffResult.stdout.trim().split('\n').filter(Boolean),
+				.map((l) => l.split(" ")[0]),
+			filesModified: diffResult.stdout.trim().split("\n").filter(Boolean),
 		};
 	} catch {
 		return {
-			branch: 'main',
+			branch: "main",
 			commits: [],
 			filesModified: [],
 		};

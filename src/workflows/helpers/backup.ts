@@ -1,11 +1,15 @@
 // src/workflows/helpers/backup.ts
-import type { Sandbox } from '@cloudflare/sandbox';
+import type { Sandbox } from "@cloudflare/sandbox";
 
 /**
  * Restore OpenCode session state from R2 backup.
  * Uses base64 encoding for binary data transfer.
  */
-export async function restoreSession(sandbox: Sandbox<unknown>, sessionId: string, bucket: R2Bucket): Promise<boolean> {
+export async function restoreSession(
+	sandbox: Sandbox<unknown>,
+	sessionId: string,
+	bucket: R2Bucket,
+): Promise<boolean> {
 	try {
 		const key = `sessions/${sessionId}/opencode-storage.tar.gz`;
 		const object = await bucket.get(key);
@@ -23,20 +27,20 @@ export async function restoreSession(sandbox: Sandbox<unknown>, sessionId: strin
 		// Split into chunks if very large to avoid command line limits
 		const chunkSize = 100000; // ~100KB chunks
 		if (base64Data.length > chunkSize) {
-			await sandbox.exec('rm -f /tmp/opencode-backup.b64');
+			await sandbox.exec("rm -f /tmp/opencode-backup.b64");
 			for (let i = 0; i < base64Data.length; i += chunkSize) {
 				const chunk = base64Data.slice(i, i + chunkSize);
 				await sandbox.exec(`printf '%s' '${chunk}' >> /tmp/opencode-backup.b64`);
 			}
-			await sandbox.exec('base64 -d /tmp/opencode-backup.b64 > /tmp/opencode-backup.tar.gz');
-			await sandbox.exec('rm -f /tmp/opencode-backup.b64');
+			await sandbox.exec("base64 -d /tmp/opencode-backup.b64 > /tmp/opencode-backup.tar.gz");
+			await sandbox.exec("rm -f /tmp/opencode-backup.b64");
 		} else {
 			await sandbox.exec(`echo '${base64Data}' | base64 -d > /tmp/opencode-backup.tar.gz`);
 		}
 
-		await sandbox.exec('mkdir -p ~/.local/share/opencode');
-		await sandbox.exec('tar -xzf /tmp/opencode-backup.tar.gz -C ~/.local/share/opencode');
-		await sandbox.exec('rm -f /tmp/opencode-backup.tar.gz');
+		await sandbox.exec("mkdir -p ~/.local/share/opencode");
+		await sandbox.exec("tar -xzf /tmp/opencode-backup.tar.gz -C ~/.local/share/opencode");
+		await sandbox.exec("rm -f /tmp/opencode-backup.tar.gz");
 
 		return true;
 	} catch {
@@ -48,24 +52,32 @@ export async function restoreSession(sandbox: Sandbox<unknown>, sessionId: strin
  * Backup OpenCode session state to R2.
  * Uses readFileStream for proper binary handling.
  */
-export async function backupSession(sandbox: Sandbox<unknown>, sessionId: string, bucket: R2Bucket): Promise<void> {
+export async function backupSession(
+	sandbox: Sandbox<unknown>,
+	sessionId: string,
+	bucket: R2Bucket,
+): Promise<void> {
 	try {
 		// Create archive of OpenCode storage
-		const archiveResult = await sandbox.exec(`tar -czf /tmp/opencode-backup.tar.gz -C ~/.local/share/opencode storage 2>/dev/null || true`);
+		const archiveResult = await sandbox.exec(
+			`tar -czf /tmp/opencode-backup.tar.gz -C ~/.local/share/opencode storage 2>/dev/null || true`,
+		);
 
 		if (archiveResult.exitCode !== 0) {
 			return;
 		}
 
 		// Check if archive was created
-		const checkResult = await sandbox.exec(`test -f /tmp/opencode-backup.tar.gz && echo exists || echo missing`);
+		const checkResult = await sandbox.exec(
+			`test -f /tmp/opencode-backup.tar.gz && echo exists || echo missing`,
+		);
 
-		if (checkResult.stdout.trim() !== 'exists') {
+		if (checkResult.stdout.trim() !== "exists") {
 			return;
 		}
 
 		// Read file as stream for proper binary handling
-		const fileStream = await sandbox.readFileStream('/tmp/opencode-backup.tar.gz');
+		const fileStream = await sandbox.readFileStream("/tmp/opencode-backup.tar.gz");
 		const reader = fileStream.getReader();
 		const chunks: Uint8Array[] = [];
 
@@ -92,7 +104,7 @@ export async function backupSession(sandbox: Sandbox<unknown>, sessionId: string
 		await bucket.put(key, archiveBuffer);
 
 		// Cleanup
-		await sandbox.exec('rm -f /tmp/opencode-backup.tar.gz');
+		await sandbox.exec("rm -f /tmp/opencode-backup.tar.gz");
 	} catch {
 		// Errors captured at workflow level via telemetry
 	}
@@ -108,5 +120,5 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 		const chunk = bytes.subarray(i, i + CHUNK_SIZE);
 		chunks.push(String.fromCharCode.apply(null, chunk as unknown as number[]));
 	}
-	return btoa(chunks.join(''));
+	return btoa(chunks.join(""));
 }
