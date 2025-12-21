@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Schema } from 'effect';
 
 /**
  * Shared validation constants
@@ -8,7 +8,7 @@ export const TASK_MAX_LENGTH = 50000;
 /**
  * Valid run status values
  */
-const RunStatus = Schema.Literal("queued", "running", "completed", "failed", "retrying");
+const RunStatus = Schema.Literal('queued', 'running', 'completed', 'failed', 'retrying');
 
 /**
  * Result of a completed run

@@ -1,7 +1,7 @@
-import { Context, Effect, Layer, Option, Schema, ParseResult } from "effect";
-import { SessionMetadata } from "../models/session";
-import { RunRecord } from "../models/run";
-import { StorageReadError, StorageWriteError } from "../models/errors";
+import { Context, Effect, Layer, Option, Schema, ParseResult } from 'effect';
+import { SessionMetadata } from '../models/session';
+import { RunRecord } from '../models/run';
+import { StorageReadError, StorageWriteError } from '../models/errors';
 
 /**
  * SQL storage type - use SqlStorage from workers types at runtime,
@@ -13,9 +13,7 @@ export type SqlStorageInterface = SqlStorage;
  * Storage service interface
  */
 interface StorageServiceInterface {
-	readonly getSession: (
-		sessionId: string,
-	) => Effect.Effect<Option.Option<SessionMetadata>, StorageReadError>;
+	readonly getSession: (sessionId: string) => Effect.Effect<Option.Option<SessionMetadata>, StorageReadError>;
 
 	readonly putSession: (session: SessionMetadata) => Effect.Effect<void, StorageWriteError>;
 
@@ -25,10 +23,7 @@ interface StorageServiceInterface {
 
 	readonly putRun: (run: RunRecord) => Effect.Effect<void, StorageWriteError>;
 
-	readonly listRuns: (
-		sessionId: string,
-		limit?: number,
-	) => Effect.Effect<ReadonlyArray<RunRecord>, StorageReadError>;
+	readonly listRuns: (sessionId: string, limit?: number) => Effect.Effect<ReadonlyArray<RunRecord>, StorageReadError>;
 
 	readonly initSchema: () => Effect.Effect<void, StorageWriteError>;
 }
@@ -48,13 +43,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 		Effect.gen(function* () {
 			// Query the database
 			const result = yield* Effect.try({
-				try: () =>
-					sql
-						.exec<{ key: string; data: string }>(
-							"SELECT key, data FROM sessions WHERE key = ?",
-							sessionId,
-						)
-						.toArray(),
+				try: () => sql.exec<{ key: string; data: string }>('SELECT key, data FROM sessions WHERE key = ?', sessionId).toArray(),
 				catch: (error) =>
 					new StorageReadError({
 						key: `session:${sessionId}`,
@@ -94,12 +83,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 		Effect.try({
 			try: () => {
 				const data = JSON.stringify(session);
-				sql.exec(
-					"INSERT OR REPLACE INTO sessions (key, data, updated_at) VALUES (?, ?, ?)",
-					session.sessionId,
-					data,
-					Date.now(),
-				);
+				sql.exec('INSERT OR REPLACE INTO sessions (key, data, updated_at) VALUES (?, ?, ?)', session.sessionId, data, Date.now());
 			},
 			catch: (error) =>
 				new StorageWriteError({
@@ -111,7 +95,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 	deleteSession: (sessionId) =>
 		Effect.try({
 			try: () => {
-				sql.exec("DELETE FROM sessions WHERE key = ?", sessionId);
+				sql.exec('DELETE FROM sessions WHERE key = ?', sessionId);
 			},
 			catch: (error) =>
 				new StorageWriteError({
@@ -124,10 +108,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 		Effect.gen(function* () {
 			// Query the database
 			const result = yield* Effect.try({
-				try: () =>
-					sql
-						.exec<{ key: string; data: string }>("SELECT key, data FROM runs WHERE key = ?", runId)
-						.toArray(),
+				try: () => sql.exec<{ key: string; data: string }>('SELECT key, data FROM runs WHERE key = ?', runId).toArray(),
 				catch: (error) =>
 					new StorageReadError({
 						key: `run:${runId}`,
@@ -168,7 +149,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 			try: () => {
 				const data = JSON.stringify(run);
 				sql.exec(
-					"INSERT OR REPLACE INTO runs (key, session_id, data, updated_at) VALUES (?, ?, ?, ?)",
+					'INSERT OR REPLACE INTO runs (key, session_id, data, updated_at) VALUES (?, ?, ?, ?)',
 					run.runId,
 					run.sessionId,
 					data,
@@ -188,11 +169,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 			const result = yield* Effect.try({
 				try: () =>
 					sql
-						.exec<{ data: string }>(
-							"SELECT data FROM runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT ?",
-							sessionId,
-							limit,
-						)
+						.exec<{ data: string }>('SELECT data FROM runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT ?', sessionId, limit)
 						.toArray(),
 				catch: (error) =>
 					new StorageReadError({
@@ -256,7 +233,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 			},
 			catch: (error) =>
 				new StorageWriteError({
-					key: "schema",
+					key: 'schema',
 					cause: String(error),
 				}),
 		}),
@@ -265,10 +242,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 /**
  * Storage service context tag
  */
-export class StorageService extends Context.Tag("@sandbox-mcp/StorageService")<
-	StorageService,
-	StorageServiceInterface
->() {}
+export class StorageService extends Context.Tag('@sandbox-mcp/StorageService')<StorageService, StorageServiceInterface>() {}
 
 /**
  * Create storage service layer from SQL executor
