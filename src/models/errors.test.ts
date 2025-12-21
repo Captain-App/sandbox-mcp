@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { SessionNotFoundError, SandboxStartupError, isSessionError } from "./errors";
+import {
+	SessionNotFoundError,
+	StorageReadError,
+	isSessionError,
+	isStorageError,
+} from "./errors";
 
 describe("Error Models", () => {
 	it("should create SessionNotFoundError with correct message", () => {
@@ -17,14 +22,14 @@ describe("Error Models", () => {
 		expect(isSessionError(new Error("random"))).toBe(false);
 	});
 
-	it("should create SandboxStartupError with cause", () => {
-		const cause = new Error("Connection refused");
-		const error = new SandboxStartupError({
-			sandboxId: "sandbox-1",
-			cause: cause.message,
+	it("should create StorageReadError with cause", () => {
+		const error = new StorageReadError({
+			key: "session:test-1",
+			cause: "Connection refused",
 		});
 
-		expect(error._tag).toBe("SandboxStartupError");
-		expect(error.sandboxId).toBe("sandbox-1");
+		expect(error._tag).toBe("StorageReadError");
+		expect(error.key).toBe("session:test-1");
+		expect(isStorageError(error)).toBe(true);
 	});
 });

@@ -5,11 +5,9 @@
  * Inspired by https://loggingsucks.com/ - instead of scattered log lines,
  * we emit ONE comprehensive event per request with all context.
  *
- * This module provides helpers to build and emit wide events that can be
- * queried, aggregated, and analyzed effectively.
+ * This module provides event builders for MCP tool calls and workflow
+ * execution. Callers use console.log(JSON.stringify(event)) to emit.
  */
-
-import { Context, Effect, Layer } from "effect";
 
 /**
  * Wide event structure for MCP tool calls
@@ -267,77 +265,3 @@ export class WorkflowEventBuilder {
     return this.event;
   }
 }
-
-/**
- * Telemetry service interface
- */
-export interface TelemetryServiceInterface {
-  /**
-   * Emit a wide event for a tool call
-   */
-  readonly emitToolCall: (event: ToolCallEvent) => Effect.Effect<void>;
-
-  /**
-   * Emit a wide event for workflow execution
-   */
-  readonly emitWorkflow: (event: WorkflowEvent) => Effect.Effect<void>;
-
-  /**
-   * Create a builder for tool call events
-   */
-  readonly toolCallBuilder: (
-    tool: string,
-    requestId: string
-  ) => ToolCallEventBuilder;
-
-  /**
-   * Create a builder for workflow events
-   */
-  readonly workflowBuilder: (
-    workflowId: string,
-    runId: string,
-    sessionId: string
-  ) => WorkflowEventBuilder;
-}
-
-/**
- * Create telemetry service
- *
- * Currently logs to Effect's logging system which outputs to console.
- * In production, this could be extended to send to:
- * - Axiom, Datadog, or other observability platforms
- * - Cloudflare Analytics Engine
- * - A queue for async processing
- */
-export const makeTelemetryService = (): TelemetryServiceInterface => ({
-  emitToolCall: (event) =>
-    Effect.log("tool_call").pipe(
-      Effect.annotateLogs(event as unknown as Record<string, unknown>)
-    ),
-
-  emitWorkflow: (event) =>
-    Effect.log("workflow_execution").pipe(
-      Effect.annotateLogs(event as unknown as Record<string, unknown>)
-    ),
-
-  toolCallBuilder: (tool, requestId) => new ToolCallEventBuilder(tool, requestId),
-
-  workflowBuilder: (workflowId, runId, sessionId) =>
-    new WorkflowEventBuilder(workflowId, runId, sessionId),
-});
-
-/**
- * Telemetry service context tag
- */
-export class TelemetryService extends Context.Tag("@sandbox-mcp/TelemetryService")<
-  TelemetryService,
-  TelemetryServiceInterface
->() {}
-
-/**
- * Telemetry service layer
- */
-export const TelemetryLive: Layer.Layer<TelemetryService> = Layer.succeed(
-  TelemetryService,
-  makeTelemetryService()
-);
