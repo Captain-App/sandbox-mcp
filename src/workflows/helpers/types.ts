@@ -43,6 +43,8 @@ export interface TaskResult {
   title?: string;
   /** OpenCode session ID for future continuation */
   opencodeSessionId?: string;
+  /** Working directory where the task was executed */
+  workspacePath?: string;
   /** Token usage from the LLM */
   tokens?: {
     input: number;

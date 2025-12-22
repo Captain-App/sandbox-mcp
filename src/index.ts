@@ -83,21 +83,6 @@ function getSessionFromCookie(request: Request): string | null {
 }
 
 /**
- * Check if this is an OpenCode asset request (JS, CSS, images, manifest, etc.)
- */
-function isAssetRequest(pathname: string): boolean {
-  return (
-    pathname.startsWith("/assets/") ||
-    pathname === "/favicon.ico" ||
-    pathname === "/favicon.svg" ||
-    pathname.startsWith("/favicon-") ||
-    pathname === "/apple-touch-icon.png" ||
-    pathname === "/site.webmanifest" ||
-    pathname.startsWith("/.well-known/")
-  );
-}
-
-/**
  * Proxy request to the appropriate sandbox
  */
 async function proxyToSandbox(
@@ -169,101 +154,90 @@ export default {
       return OpenCodeMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 
-    // Web UI proxy - /session/{sessionId}/* routes to OpenCode web UI
-    // This allows users to interact with OpenCode directly in their browser
-    const sessionMatch = url.pathname.match(/^\/session\/([^/]+)(\/.*)?$/);
+    // Web UI entry point - /session/{sessionId} sets cookie and redirects to OpenCode
+    // OpenCode expects URLs like /{base64(directory)}/session/{opencode-session-id}
+    // We query the DO to get the actual OpenCode session ID and workspace path
+    //
+    // IMPORTANT: Don't match OpenCode's own API routes like /session/status, /session/list
+    // Our session IDs are 8 hex chars (e.g., "a1b2c3d4"), so we use that pattern
+    const sessionMatch = url.pathname.match(/^\/session\/([0-9a-f]{8})\/?$/);
     if (sessionMatch) {
       const sessionId = sessionMatch[1];
-      const subPath = sessionMatch[2] || "/";
 
-      // Handle the ?url= redirect for OpenCode frontend
-      // OpenCode's frontend defaults to localhost:4096 - we need to tell it our proxy URL
-      // We set ?url= to the origin (not session path) because API calls go through root
-      // and we use a cookie to track which session for asset requests
-      if (!url.searchParams.has("url") && request.method === "GET") {
-        const accept = request.headers.get("accept") || "";
-        const isHtmlRequest = accept.includes("text/html") || subPath === "/";
-        if (isHtmlRequest) {
-          // Redirect to same URL but with ?url= pointing to origin
-          // The frontend will make API calls to /session/list, /session/prompt etc.
-          // which we'll route based on the session cookie
-          url.searchParams.set("url", url.origin);
-          const redirectUrl = url.toString();
-          // Set cookie so we know which session for subsequent requests
-          return new Response(null, {
-            status: 302,
-            headers: {
-              Location: redirectUrl,
-              "Set-Cookie": `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; SameSite=Lax`,
-            },
-          });
+      // Look up session info from R2
+      // Session metadata is stored as JSON in R2 at sessions/{sessionId}/metadata.json
+      // This is written by the MCP agent when sessions are created/updated
+      const metadataKey = `sessions/${sessionId}/metadata.json`;
+      const metadataObject = await env.SESSIONS_BUCKET.get(metadataKey);
+
+      let sessionInfo: {
+        found: boolean;
+        opencodeSessionId?: string;
+        workspacePath?: string;
+      };
+
+      if (metadataObject) {
+        try {
+          const metadata = await metadataObject.json<{
+            opencodeSessionId?: string;
+            workspacePath?: string;
+          }>();
+          sessionInfo = {
+            found: true,
+            opencodeSessionId: metadata.opencodeSessionId,
+            workspacePath: metadata.workspacePath,
+          };
+        } catch {
+          sessionInfo = { found: false };
         }
+      } else {
+        sessionInfo = { found: false };
       }
 
-      try {
-        const response = await proxyToSandbox(request, env, sessionId, subPath);
-        // Set/refresh cookie on session responses
-        const headers = new Headers(response.headers);
-        headers.append("Set-Cookie", `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; SameSite=Lax`);
-        return new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers,
+      if (!sessionInfo.found) {
+        return new Response(JSON.stringify({ error: "Session not found", sessionId }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
         });
+      }
+
+      // Use the stored workspace path, or default to /workspace
+      const workspacePath = sessionInfo.workspacePath || "/workspace";
+      const workspaceBase64 = btoa(workspacePath);
+
+      // Build redirect URL - include OpenCode session ID if available
+      let redirectPath = `/${workspaceBase64}/session`;
+      if (sessionInfo.opencodeSessionId) {
+        redirectPath += `/${sessionInfo.opencodeSessionId}`;
+      }
+
+      const redirectUrl = new URL(redirectPath, url.origin);
+      redirectUrl.searchParams.set("url", url.origin);
+
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: redirectUrl.toString(),
+          "Set-Cookie": `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; SameSite=Lax`,
+        },
+      });
+    }
+
+    // Catch-all: Proxy ANY request to the sandbox when session cookie is present
+    // This handles OpenCode API routes like /path, /project, /provider, /global/event,
+    // /session/list, /session/{uuid}/prompt, etc.
+    // Must come BEFORE the default JSON response
+    const sessionId = getSessionFromCookie(request);
+    if (sessionId) {
+      try {
+        return await proxyToSandbox(request, env, sessionId, url.pathname);
       } catch (error) {
-        console.error("Web UI proxy error:", error);
-        return new Response(
-          JSON.stringify({
-            error: "Failed to connect to session",
-            message: error instanceof Error ? error.message : String(error),
-            sessionId,
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
+        console.error("API proxy error:", error);
+        return new Response(JSON.stringify({ error: "Failed to proxy request" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
       }
-    }
-
-    // Handle OpenCode asset requests (JS, CSS, favicons, etc.)
-    // These come from the browser after loading /session/{id}/ HTML
-    // and need to be routed to the correct sandbox using the session cookie
-    if (isAssetRequest(url.pathname)) {
-      const sessionId = getSessionFromCookie(request);
-      if (sessionId) {
-        try {
-          return await proxyToSandbox(request, env, sessionId, url.pathname);
-        } catch (error) {
-          console.error("Asset proxy error:", error);
-          // Fall through to 404
-        }
-      }
-      return new Response("Not Found", { status: 404 });
-    }
-
-    // Handle OpenCode API requests that go to root paths
-    // e.g., /session/list, /session/{id}/prompt (note: different from /session/{our-id}/)
-    // These need to be routed based on the session cookie
-    // Only match if it looks like an OpenCode API path (has UUID-like session ID)
-    const opencodeApiMatch = url.pathname.match(/^\/session\/([0-9a-f-]{36})(\/.*)?$/);
-    if (opencodeApiMatch || url.pathname === "/session" || url.pathname === "/session/") {
-      const sessionId = getSessionFromCookie(request);
-      if (sessionId) {
-        try {
-          return await proxyToSandbox(request, env, sessionId, url.pathname);
-        } catch (error) {
-          console.error("API proxy error:", error);
-          return new Response(JSON.stringify({ error: "Failed to proxy request" }), {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-      }
-      return new Response(
-        JSON.stringify({ error: "No session context - visit /session/{id}/ first" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
     }
 
     // Default response

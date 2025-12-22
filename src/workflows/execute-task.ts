@@ -148,6 +148,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
         error: executeResult.result.error,
         title,
         opencodeSessionId: executeResult.opencodeSessionId,
+        workspacePath: workingDirectory,
         tokens: executeResult.result.tokens,
       };
 

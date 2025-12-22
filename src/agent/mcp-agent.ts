@@ -35,6 +35,18 @@ interface AgentState {
 }
 
 /**
+ * Session metadata stored in R2 for cross-DO access
+ * This allows the web UI to look up session info without knowing which DO has it
+ */
+interface R2SessionMetadata {
+  sessionId: string;
+  opencodeSessionId?: string;
+  workspacePath?: string;
+  webUiUrl?: string;
+  updatedAt: number;
+}
+
+/**
  * Extended context type for accessing Durable Object internals
  * The McpAgent extends Agent which has ctx but TypeScript types don't expose sql
  */
@@ -254,6 +266,8 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
                 yield* storage.putSession(session);
               }),
             );
+            // Write to R2 for cross-DO access (web UI lookups)
+            await this.writeSessionMetadataToR2(session);
           }
 
           // 2. Check if additional repo needs cloning
@@ -539,6 +553,57 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
+   * Write session metadata to R2 for cross-DO access
+   * This allows the web UI to look up session info without knowing which DO has it
+   */
+  private async writeSessionMetadataToR2(session: SessionMetadata): Promise<void> {
+    const metadata: R2SessionMetadata = {
+      sessionId: session.sessionId,
+      opencodeSessionId: session.opencodeSessionId,
+      workspacePath: session.workspacePath,
+      webUiUrl: session.webUiUrl,
+      updatedAt: Date.now(),
+    };
+
+    const key = `sessions/${session.sessionId}/metadata.json`;
+    await this.env.SESSIONS_BUCKET.put(key, JSON.stringify(metadata), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    console.log(`Wrote session metadata to R2: ${key}`);
+  }
+
+  /**
+   * RPC method to get session info for web UI routing
+   * Note: This method is no longer used - we now read from R2 directly in the worker.
+   * Kept for backward compatibility and potential future use.
+   * @public Called via DO RPC from worker
+   */
+  async getSessionInfo(sessionId: string): Promise<{
+    found: boolean;
+    opencodeSessionId?: string;
+    workspacePath?: string;
+  }> {
+    const rt = this.ensureRuntime();
+
+    return rt.runPromise(
+      Effect.gen(function* () {
+        const storage = yield* StorageService;
+        const session = yield* storage.getSession(sessionId);
+
+        if (session._tag === "None") {
+          return { found: false };
+        }
+
+        return {
+          found: true,
+          opencodeSessionId: session.value.opencodeSessionId,
+          workspacePath: session.value.workspacePath,
+        };
+      }),
+    );
+  }
+
+  /**
    * RPC method called by Workflow when task completes
    * @public Called via DO RPC from ExecuteTaskWorkflow
    */
@@ -550,6 +615,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       error?: string;
       title?: string;
       opencodeSessionId?: string;
+      workspacePath?: string;
       tokens?: {
         input: number;
         output: number;
@@ -561,7 +627,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     // may arrive before init() is called (e.g., when DO is woken from cold state)
     const rt = this.ensureRuntime();
 
-    await rt.runPromise(
+    const result = await rt.runPromise(
       Effect.gen(function* () {
         const storage = yield* StorageService;
         const existing = yield* storage.getRun(params.runId);
@@ -581,19 +647,29 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           };
           yield* storage.putRun(updated);
 
-          // Update session with opencodeSessionId for continuation
-          if (params.result.opencodeSessionId) {
+          // Update session with opencodeSessionId and workspacePath for continuation
+          if (params.result.opencodeSessionId || params.result.workspacePath) {
             const session = yield* storage.getSession(existing.value.sessionId);
             if (session._tag === "Some") {
-              yield* storage.putSession({
+              const updatedSession = {
                 ...session.value,
-                opencodeSessionId: params.result.opencodeSessionId,
+                opencodeSessionId:
+                  params.result.opencodeSessionId ?? session.value.opencodeSessionId,
+                workspacePath: params.result.workspacePath ?? session.value.workspacePath,
                 lastActivity: Date.now(),
-              });
+              };
+              yield* storage.putSession(updatedSession);
+              return { updatedSession };
             }
           }
         }
+        return { updatedSession: null };
       }),
     );
+
+    // Write to R2 for cross-DO access (web UI lookups)
+    if (result?.updatedSession) {
+      await this.writeSessionMetadataToR2(result.updatedSession);
+    }
   }
 }
