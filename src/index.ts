@@ -58,6 +58,74 @@ function getProxyOpencodeConfig(proxyBaseUrl: string, proxyToken: string): Confi
   };
 }
 
+/**
+ * Proxy a request to a session's OpenCode container.
+ * Handles sandbox setup, token creation, and URL rewriting.
+ */
+async function proxyToSession(
+  sessionId: string,
+  subPath: string,
+  originalUrl: URL,
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  try {
+    // Get sandbox for this session (will wake it up if sleeping)
+    const sandbox = getSandbox(env.Sandbox, sessionId, {
+      normalizeId: true,
+    });
+
+    // Create a short-lived proxy token for web UI access
+    const proxyToken = await Effect.runPromise(
+      createProxyToken({
+        secret: env.PROXY_JWT_SECRET,
+        sandboxId: sessionId,
+        expiresIn: "15m", // Short-lived for web UI sessions
+      }),
+    );
+
+    // Configure sandbox to use proxy for external services
+    const containerProxyUrl = toContainerUrl(env.PROXY_BASE_URL);
+    await configureAnthropic(sandbox, containerProxyUrl, proxyToken);
+    await configureGithub(sandbox, containerProxyUrl, proxyToken);
+
+    // Start OpenCode server with proxy-based config
+    const server = await createOpencodeServer(sandbox, {
+      directory: "/workspace",
+      config: getProxyOpencodeConfig(env.PROXY_BASE_URL, proxyToken),
+    });
+
+    // Rewrite URL to use the subPath (strip /session/{id} prefix if present)
+    // Keep query params (including ?url= for frontend configuration)
+    const rewrittenUrl = new URL(subPath, originalUrl.origin);
+    rewrittenUrl.search = originalUrl.search;
+
+    // Create new request with rewritten URL but preserve method/headers/body
+    const rewrittenRequest = new Request(rewrittenUrl.toString(), {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      redirect: request.redirect,
+    });
+
+    // Proxy directly to container
+    return sandbox.containerFetch(rewrittenRequest, server.port);
+  } catch (error) {
+    console.error("Web UI proxy error:", error);
+    return new Response(
+      JSON.stringify({
+        error: "Failed to connect to session",
+        message: error instanceof Error ? error.message : String(error),
+        sessionId,
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
+}
+
 // Worker fetch handler
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -97,65 +165,37 @@ export default {
           // This tells OpenCode frontend to use /session/{id}/ as the API base
           const sessionBaseUrl = `${url.origin}/session/${sessionId}`;
           url.searchParams.set("url", sessionBaseUrl);
-          return Response.redirect(url.toString(), 302);
+          // Set cookie so we can route asset requests to the same session
+          const response = Response.redirect(url.toString(), 302);
+          const headers = new Headers(response.headers);
+          headers.set("Set-Cookie", `opencode_session=${sessionId}; Path=/; SameSite=Lax`);
+          return new Response(null, {
+            status: 302,
+            headers,
+          });
         }
       }
 
-      try {
-        // Get sandbox for this session (will wake it up if sleeping)
-        const sandbox = getSandbox(env.Sandbox, sessionId, {
-          normalizeId: true,
-        });
+      return proxyToSession(sessionId, subPath, url, request, env);
+    }
 
-        // Create a short-lived proxy token for web UI access
-        const proxyToken = await Effect.runPromise(
-          createProxyToken({
-            secret: env.PROXY_JWT_SECRET,
-            sandboxId: sessionId,
-            expiresIn: "15m", // Short-lived for web UI sessions
-          }),
-        );
+    // Handle OpenCode asset requests (they use absolute paths like /assets/...)
+    // We need to route them to the correct session using a cookie
+    const isAssetRequest =
+      url.pathname.startsWith("/assets/") ||
+      url.pathname.startsWith("/favicon") ||
+      url.pathname === "/site.webmanifest" ||
+      url.pathname.startsWith("/.well-known/");
 
-        // Configure sandbox to use proxy for external services
-        const containerProxyUrl = toContainerUrl(env.PROXY_BASE_URL);
-        await configureAnthropic(sandbox, containerProxyUrl, proxyToken);
-        await configureGithub(sandbox, containerProxyUrl, proxyToken);
-
-        // Start OpenCode server with proxy-based config
-        const server = await createOpencodeServer(sandbox, {
-          directory: "/workspace",
-          config: getProxyOpencodeConfig(env.PROXY_BASE_URL, proxyToken),
-        });
-
-        // Rewrite URL to strip /session/{id} prefix - OpenCode expects requests at root
-        // Keep query params (including ?url= for frontend configuration)
-        const rewrittenUrl = new URL(subPath, url.origin);
-        rewrittenUrl.search = url.search;
-
-        // Create new request with rewritten URL but preserve method/headers/body
-        const rewrittenRequest = new Request(rewrittenUrl.toString(), {
-          method: request.method,
-          headers: request.headers,
-          body: request.body,
-          redirect: request.redirect,
-        });
-
-        // Proxy directly to container (skip proxyToOpencode's redirect logic since we handle it above)
-        return sandbox.containerFetch(rewrittenRequest, server.port);
-      } catch (error) {
-        console.error("Web UI proxy error:", error);
-        return new Response(
-          JSON.stringify({
-            error: "Failed to connect to session",
-            message: error instanceof Error ? error.message : String(error),
-            sessionId,
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
+    if (isAssetRequest) {
+      // Get session ID from cookie
+      const cookieHeader = request.headers.get("cookie") || "";
+      const sessionMatch = cookieHeader.match(/opencode_session=([^;]+)/);
+      if (sessionMatch) {
+        const sessionId = sessionMatch[1];
+        return proxyToSession(sessionId, url.pathname, url, request, env);
       }
+      // No session cookie - fall through to default handler
     }
 
     // Default response
