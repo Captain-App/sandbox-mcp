@@ -2,11 +2,13 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import { Schema } from "effect";
 
 import {
   isSessionError,
+  isSessionStorageError,
   isStorageError,
   RunNotFoundError,
   SessionNotFoundError,
@@ -14,6 +16,7 @@ import {
 import type { RunRecord } from "../models/run";
 import { SessionId, type SessionMetadata } from "../models/session";
 import { createProxyToken } from "../proxy";
+import { makeSessionStorageLayer, SessionStorage } from "../services/session";
 import { makeStorageLayer, StorageService, type SqlStorageInterface } from "../services/storage";
 import { ToolCallEventBuilder } from "../services/telemetry";
 import {
@@ -32,18 +35,6 @@ import {
  */
 interface AgentState {
   initialized: boolean;
-}
-
-/**
- * Session metadata stored in R2 for cross-DO access
- * This allows the web UI to look up session info without knowing which DO has it
- */
-interface R2SessionMetadata {
-  sessionId: string;
-  opencodeSessionId?: string;
-  workspacePath?: string;
-  webUiUrl?: string;
-  updatedAt: number;
 }
 
 /**
@@ -70,11 +61,16 @@ class RuntimeNotInitializedError extends Error {
 }
 
 /**
+ * Combined service type for the MCP Agent runtime
+ */
+type AgentServices = StorageService | SessionStorage;
+
+/**
  * Get the runtime, throwing if not initialized
  */
 function getRuntime(
-  runtime: ManagedRuntime.ManagedRuntime<StorageService, never> | null,
-): ManagedRuntime.ManagedRuntime<StorageService, never> {
+  runtime: ManagedRuntime.ManagedRuntime<AgentServices, never> | null,
+): ManagedRuntime.ManagedRuntime<AgentServices, never> {
   if (runtime === null) {
     throw new RuntimeNotInitializedError();
   }
@@ -98,6 +94,12 @@ function formatDomainError(error: unknown): ReturnType<typeof formatErrorRespons
       message: error.message,
     });
   }
+  if (isSessionStorageError(error)) {
+    return formatErrorResponse({
+      code: error._tag,
+      message: error.message,
+    });
+  }
 
   // Fallback for unknown errors
   return formatErrorResponse({
@@ -108,6 +110,13 @@ function formatDomainError(error: unknown): ReturnType<typeof formatErrorRespons
 
 /**
  * OpenCode MCP Agent - Durable Object that handles MCP protocol
+ *
+ * Storage architecture:
+ * - Sessions: Stored in R2 (shared across all DO instances)
+ * - Runs: Stored in DO SQLite (per-workflow, transient)
+ *
+ * This split is necessary because the MCP library creates separate DO instances
+ * per connection, but we need sessions to be accessible across connections.
  */
 export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   server = new McpServer({
@@ -120,7 +129,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     initialized: false,
   };
 
-  private runtime: ManagedRuntime.ManagedRuntime<StorageService, never> | null = null;
+  private runtime: ManagedRuntime.ManagedRuntime<AgentServices, never> | null = null;
 
   /**
    * Access the Durable Object context with proper typing
@@ -132,6 +141,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
+   * Get the R2 bucket for session storage
+   */
+  private get sessionsBucket(): R2Bucket {
+    return this.env.SESSIONS_BUCKET;
+  }
+
+  /**
    * Initialize the MCP server with tools
    * @public Called by McpAgent framework on DO start
    */
@@ -139,9 +155,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     // Access SQL storage from the Durable Object state
     const sql = this.agentContext.ctx.storage.sql;
 
-    // Initialize SQLite schema
-    const storage = makeStorageLayer(sql);
-    this.runtime = ManagedRuntime.make(storage);
+    // Create combined layer with both storage services:
+    // - StorageService: DO SQLite for runs (transient, per-workflow)
+    // - SessionStorage: R2 for sessions (persistent, cross-DO)
+    const storageLayer = makeStorageLayer(sql);
+    const sessionLayer = makeSessionStorageLayer(this.sessionsBucket);
+    const combinedLayer = Layer.merge(storageLayer, sessionLayer);
+    this.runtime = ManagedRuntime.make(combinedLayer);
 
     await this.runtime.runPromise(
       Effect.gen(function* () {
@@ -150,7 +170,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       }),
     );
 
-    // Register tools - NEW ORDER (removed create_session)
+    // Register MCP tools
     this.registerRunTaskTool();
     this.registerGetResultTool();
     this.registerListRunsTool();
@@ -204,7 +224,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           let session: SessionMetadata;
           let isNewSession = false;
 
-          // 1. Resolve or create session
+          // 1. Resolve or create session (from R2)
           if (params.sessionId) {
             // Continue existing session
             telemetry.endPhase("validate");
@@ -212,13 +232,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
             const existing = await rt.runPromise(
               Effect.gen(function* () {
-                const storage = yield* StorageService;
-                return yield* storage.getSession(params.sessionId!);
+                const sessionStorage = yield* SessionStorage;
+                return yield* sessionStorage.getSession(params.sessionId!);
               }),
             );
 
             if (existing._tag === "None") {
-              const error = new SessionNotFoundError({ sessionId: params.sessionId! });
+              const error = new SessionNotFoundError({ sessionId: params.sessionId });
               telemetry.setError({
                 type: error._tag,
                 code: error._tag,
@@ -260,14 +280,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             telemetry.endPhase("validate");
             telemetry.startPhase("storage");
 
+            // Save new session to R2
             await rt.runPromise(
               Effect.gen(function* () {
-                const storage = yield* StorageService;
-                yield* storage.putSession(session);
+                const sessionStorage = yield* SessionStorage;
+                yield* sessionStorage.putSession(session);
               }),
             );
-            // Write to R2 for cross-DO access (web UI lookups)
-            await this.writeSessionMetadataToR2(session);
           }
 
           // 2. Check if additional repo needs cloning
@@ -323,14 +342,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           telemetry.endPhase("workflow");
           telemetry.startPhase("storage");
 
-          // 5. Create run record
+          // 5. Create run record in DO SQLite
           const run: RunRecord = {
             runId,
             sessionId: session.sessionId,
             workflowId: workflowInstance.id,
             status: "started",
             task: params.task,
-            title: params.title ?? "Processing...", // Placeholder until OpenCode generates
+            title: params.title ?? "Processing...",
             model,
             startedAt: Date.now(),
           };
@@ -342,15 +361,16 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             }),
           );
 
-          // Update session last activity
+          // Update session last activity in R2
+          const updatedSession = {
+            ...session,
+            lastActivity: Date.now(),
+            status: "active" as const,
+          };
           await rt.runPromise(
             Effect.gen(function* () {
-              const storage = yield* StorageService;
-              yield* storage.putSession({
-                ...session,
-                lastActivity: Date.now(),
-                status: "active",
-              });
+              const sessionStorage = yield* SessionStorage;
+              yield* sessionStorage.putSession(updatedSession);
             }),
           );
 
@@ -422,11 +442,12 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             return formatDomainError(error);
           }
 
-          // Get session for webUiUrl
+          // Get session for webUiUrl from R2
+          const runSessionId = run.value.sessionId;
           const session = await rt.runPromise(
             Effect.gen(function* () {
-              const storage = yield* StorageService;
-              return yield* storage.getSession(run.value.sessionId);
+              const sessionStorage = yield* SessionStorage;
+              return yield* sessionStorage.getSession(runSessionId);
             }),
           );
 
@@ -504,7 +525,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               sessionId: r.sessionId,
               status: r.status,
               title: r.title,
-              task: r.task.length > 100 ? r.task.slice(0, 100) + "..." : r.task,
+              task: r.task.length > 100 ? `${r.task.slice(0, 100)}...` : r.task,
               startedAt: r.startedAt,
               completedAt: r.completedAt,
               success: r.result?.success,
@@ -534,12 +555,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
    * Note: Durable Objects serialize requests, so there's no race condition here.
    * If onTaskComplete arrives before init(), we need to ensure the schema exists.
    */
-  private ensureRuntime(): ManagedRuntime.ManagedRuntime<StorageService, never> {
+  private ensureRuntime(): ManagedRuntime.ManagedRuntime<AgentServices, never> {
     if (this.runtime === null) {
       // Lazily initialize runtime for RPC calls that happen before init()
       const sql = this.agentContext.ctx.storage.sql;
-      const storage = makeStorageLayer(sql);
-      this.runtime = ManagedRuntime.make(storage);
+      const storageLayer = makeStorageLayer(sql);
+      const sessionLayer = makeSessionStorageLayer(this.sessionsBucket);
+      const combinedLayer = Layer.merge(storageLayer, sessionLayer);
+      this.runtime = ManagedRuntime.make(combinedLayer);
 
       // Initialize schema synchronously - required for DB operations
       this.runtime.runSync(
@@ -550,57 +573,6 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       );
     }
     return this.runtime;
-  }
-
-  /**
-   * Write session metadata to R2 for cross-DO access
-   * This allows the web UI to look up session info without knowing which DO has it
-   */
-  private async writeSessionMetadataToR2(session: SessionMetadata): Promise<void> {
-    const metadata: R2SessionMetadata = {
-      sessionId: session.sessionId,
-      opencodeSessionId: session.opencodeSessionId,
-      workspacePath: session.workspacePath,
-      webUiUrl: session.webUiUrl,
-      updatedAt: Date.now(),
-    };
-
-    const key = `sessions/${session.sessionId}/metadata.json`;
-    await this.env.SESSIONS_BUCKET.put(key, JSON.stringify(metadata), {
-      httpMetadata: { contentType: "application/json" },
-    });
-    console.log(`Wrote session metadata to R2: ${key}`);
-  }
-
-  /**
-   * RPC method to get session info for web UI routing
-   * Note: This method is no longer used - we now read from R2 directly in the worker.
-   * Kept for backward compatibility and potential future use.
-   * @public Called via DO RPC from worker
-   */
-  async getSessionInfo(sessionId: string): Promise<{
-    found: boolean;
-    opencodeSessionId?: string;
-    workspacePath?: string;
-  }> {
-    const rt = this.ensureRuntime();
-
-    return rt.runPromise(
-      Effect.gen(function* () {
-        const storage = yield* StorageService;
-        const session = yield* storage.getSession(sessionId);
-
-        if (session._tag === "None") {
-          return { found: false };
-        }
-
-        return {
-          found: true,
-          opencodeSessionId: session.value.opencodeSessionId,
-          workspacePath: session.value.workspacePath,
-        };
-      }),
-    );
   }
 
   /**
@@ -627,13 +599,13 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     // may arrive before init() is called (e.g., when DO is woken from cold state)
     const rt = this.ensureRuntime();
 
-    const result = await rt.runPromise(
+    // Update run record in DO SQLite
+    const runResult = await rt.runPromise(
       Effect.gen(function* () {
         const storage = yield* StorageService;
         const existing = yield* storage.getRun(params.runId);
 
         if (existing._tag === "Some") {
-          // Update run with result
           const updated: RunRecord = {
             ...existing.value,
             status: params.result.success ? "completed" : "failed",
@@ -646,30 +618,41 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             },
           };
           yield* storage.putRun(updated);
-
-          // Update session with opencodeSessionId and workspacePath for continuation
-          if (params.result.opencodeSessionId || params.result.workspacePath) {
-            const session = yield* storage.getSession(existing.value.sessionId);
-            if (session._tag === "Some") {
-              const updatedSession = {
-                ...session.value,
-                opencodeSessionId:
-                  params.result.opencodeSessionId ?? session.value.opencodeSessionId,
-                workspacePath: params.result.workspacePath ?? session.value.workspacePath,
-                lastActivity: Date.now(),
-              };
-              yield* storage.putSession(updatedSession);
-              return { updatedSession };
-            }
-          }
+          return { sessionId: existing.value.sessionId };
         }
-        return { updatedSession: null };
+        return { sessionId: null };
       }),
     );
 
-    // Write to R2 for cross-DO access (web UI lookups)
-    if (result?.updatedSession) {
-      await this.writeSessionMetadataToR2(result.updatedSession);
+    // Update session in R2 with opencodeSessionId and workspacePath
+    // Note: This uses last-write-wins semantics. If multiple workflows complete
+    // concurrently for the same session, the last update wins. This is acceptable
+    // because opencodeSessionId and workspacePath are typically set once and
+    // lastActivity is always updated to the most recent time anyway.
+    if (runResult.sessionId && (params.result.opencodeSessionId || params.result.workspacePath)) {
+      const sessionIdToUpdate = runResult.sessionId;
+      const session = await rt.runPromise(
+        Effect.gen(function* () {
+          const sessionStorage = yield* SessionStorage;
+          return yield* sessionStorage.getSession(sessionIdToUpdate);
+        }),
+      );
+
+      if (session._tag === "Some") {
+        const updatedSession: SessionMetadata = {
+          ...session.value,
+          opencodeSessionId: params.result.opencodeSessionId ?? session.value.opencodeSessionId,
+          workspacePath: params.result.workspacePath ?? session.value.workspacePath,
+          lastActivity: Date.now(),
+        };
+
+        await rt.runPromise(
+          Effect.gen(function* () {
+            const sessionStorage = yield* SessionStorage;
+            yield* sessionStorage.putSession(updatedSession);
+          }),
+        );
+      }
     }
   }
 }

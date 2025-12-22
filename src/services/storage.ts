@@ -1,7 +1,8 @@
-import { Context, Effect, Layer, Option, Schema, ParseResult } from "effect";
-import { SessionMetadata } from "../models/session";
-import { RunRecord } from "../models/run";
+// src/services/storage.ts
+import { Context, Effect, Layer, Option, ParseResult, Schema } from "effect";
+
 import { StorageReadError, StorageWriteError } from "../models/errors";
+import { RunRecord } from "../models/run";
 
 /**
  * SQL storage type - use SqlStorage from workers types at runtime,
@@ -20,17 +21,13 @@ interface ListAllRunsOptions {
 }
 
 /**
- * Storage service interface
+ * Storage service interface for run records.
+ *
+ * Note: Session metadata is stored in R2 via SessionService, not here.
+ * This service only handles run records which are tied to workflow execution
+ * and can safely be stored per-DO since runs are transient.
  */
 interface StorageServiceInterface {
-  readonly getSession: (
-    sessionId: string,
-  ) => Effect.Effect<Option.Option<SessionMetadata>, StorageReadError>;
-
-  readonly putSession: (session: SessionMetadata) => Effect.Effect<void, StorageWriteError>;
-
-  readonly deleteSession: (sessionId: string) => Effect.Effect<void, StorageWriteError>;
-
   readonly getRun: (runId: string) => Effect.Effect<Option.Option<RunRecord>, StorageReadError>;
 
   readonly putRun: (run: RunRecord) => Effect.Effect<void, StorageWriteError>;
@@ -61,89 +58,15 @@ const formatParseError = (error: ParseResult.ParseError): string => {
  * Create storage service from SQL executor
  */
 export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInterface => ({
-  getSession: (sessionId) =>
-    Effect.gen(function* () {
-      // Query the database
-      const result = yield* Effect.try({
-        try: () =>
-          sql
-            .exec<{ key: string; data: string }>(
-              "SELECT key, data FROM sessions WHERE key = ?",
-              sessionId,
-            )
-            .toArray(),
-        catch: (error) =>
-          new StorageReadError({
-            key: `session:${sessionId}`,
-            cause: String(error),
-          }),
-      });
-
-      if (result.length === 0) {
-        return Option.none();
-      }
-
-      // Parse JSON and decode with Effect Schema
-      const jsonData = yield* Effect.try({
-        try: () => JSON.parse(result[0].data) as unknown,
-        catch: (error) =>
-          new StorageReadError({
-            key: `session:${sessionId}`,
-            cause: `Invalid JSON: ${error}`,
-          }),
-      });
-
-      // Use Schema.decodeUnknown (returns Effect) for proper error handling
-      const parsed = yield* Schema.decodeUnknown(SessionMetadata)(jsonData).pipe(
-        Effect.mapError(
-          (parseError) =>
-            new StorageReadError({
-              key: `session:${sessionId}`,
-              cause: `Schema validation failed: ${formatParseError(parseError)}`,
-            }),
-        ),
-      );
-
-      return Option.some(parsed);
-    }),
-
-  putSession: (session) =>
-    Effect.try({
-      try: () => {
-        const data = JSON.stringify(session);
-        sql.exec(
-          "INSERT OR REPLACE INTO sessions (key, data, updated_at) VALUES (?, ?, ?)",
-          session.sessionId,
-          data,
-          Date.now(),
-        );
-      },
-      catch: (error) =>
-        new StorageWriteError({
-          key: `session:${session.sessionId}`,
-          cause: String(error),
-        }),
-    }),
-
-  deleteSession: (sessionId) =>
-    Effect.try({
-      try: () => {
-        sql.exec("DELETE FROM sessions WHERE key = ?", sessionId);
-      },
-      catch: (error) =>
-        new StorageWriteError({
-          key: `session:${sessionId}`,
-          cause: String(error),
-        }),
-    }),
-
   getRun: (runId) =>
     Effect.gen(function* () {
-      // Query the database
       const result = yield* Effect.try({
         try: () =>
           sql
-            .exec<{ key: string; data: string }>("SELECT key, data FROM runs WHERE key = ?", runId)
+            .exec<{
+              key: string;
+              data: string;
+            }>("SELECT key, data FROM runs WHERE key = ?", runId)
             .toArray(),
         catch: (error) =>
           new StorageReadError({
@@ -156,7 +79,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
         return Option.none();
       }
 
-      // Parse JSON
       const jsonData = yield* Effect.try({
         try: () => JSON.parse(result[0].data) as unknown,
         catch: (error) =>
@@ -166,7 +88,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
           }),
       });
 
-      // Use Schema.decodeUnknown for proper error handling
       const parsed = yield* Schema.decodeUnknown(RunRecord)(jsonData).pipe(
         Effect.mapError(
           (parseError) =>
@@ -201,11 +122,12 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 
   listRuns: (sessionId, limit = 10) =>
     Effect.gen(function* () {
-      // Query the database
       const result = yield* Effect.try({
         try: () =>
           sql
-            .exec<{ data: string }>(
+            .exec<{
+              data: string;
+            }>(
               "SELECT data FROM runs WHERE session_id = ? ORDER BY updated_at DESC LIMIT ?",
               sessionId,
               limit,
@@ -218,10 +140,8 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
           }),
       });
 
-      // Parse and validate each row
       const runs: RunRecord[] = [];
       for (const row of result) {
-        // Parse JSON
         const jsonData = yield* Effect.try({
           try: () => JSON.parse(row.data) as unknown,
           catch: (error) =>
@@ -231,7 +151,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
             }),
         });
 
-        // Use Schema.decodeUnknown for proper error handling
         const parsed = yield* Schema.decodeUnknown(RunRecord)(jsonData).pipe(
           Effect.mapError(
             (parseError) =>
@@ -253,8 +172,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
       const { sessionId, status, limit = 10, before } = options;
 
       // Build dynamic query with optional filters
-      // We store started_at in the JSON data field, so we need to extract it
-      // For better performance, we use updated_at as a proxy (they're set at same time for new runs)
       let query = "SELECT data FROM runs WHERE 1=1";
       const params: (string | number)[] = [];
 
@@ -263,14 +180,7 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
         params.push(sessionId);
       }
 
-      if (status !== undefined) {
-        // Status is stored in JSON, so we need to filter after fetching
-        // For now, we filter in JS after fetching
-        // TODO: Consider adding status column for better query performance
-      }
-
       if (before !== undefined) {
-        // Filter by updated_at as proxy for started_at
         query += " AND updated_at < ?";
         params.push(before);
       }
@@ -279,7 +189,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
       // Fetch extra if filtering by status (we'll filter in JS)
       params.push(status !== undefined ? limit * 3 : limit);
 
-      // Query the database
       const result = yield* Effect.try({
         try: () => sql.exec<{ data: string }>(query, ...params).toArray(),
         catch: (error) =>
@@ -289,10 +198,8 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
           }),
       });
 
-      // Parse and validate each row
       const runs: RunRecord[] = [];
       for (const row of result) {
-        // Parse JSON
         const jsonData = yield* Effect.try({
           try: () => JSON.parse(row.data) as unknown,
           catch: (error) =>
@@ -302,7 +209,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
             }),
         });
 
-        // Use Schema.decodeUnknown for proper error handling
         const parsed = yield* Schema.decodeUnknown(RunRecord)(jsonData).pipe(
           Effect.mapError(
             (parseError) =>
@@ -320,7 +226,6 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
 
         runs.push(parsed);
 
-        // Stop once we have enough results
         if (runs.length >= limit) {
           break;
         }
@@ -332,30 +237,23 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
   initSchema: () =>
     Effect.try({
       try: () => {
+        // Only create runs table - sessions are now stored in R2
         sql.exec(`
-					CREATE TABLE IF NOT EXISTS sessions (
-						key TEXT PRIMARY KEY,
-						data TEXT NOT NULL,
-						updated_at INTEGER NOT NULL
-					)
-				`);
+          CREATE TABLE IF NOT EXISTS runs (
+            key TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            data TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          )
+        `);
         sql.exec(`
-					CREATE TABLE IF NOT EXISTS runs (
-						key TEXT PRIMARY KEY,
-						session_id TEXT NOT NULL,
-						data TEXT NOT NULL,
-						updated_at INTEGER NOT NULL
-					)
-				`);
+          CREATE INDEX IF NOT EXISTS idx_runs_session
+          ON runs(session_id, updated_at DESC)
+        `);
         sql.exec(`
-					CREATE INDEX IF NOT EXISTS idx_runs_session 
-					ON runs(session_id, updated_at DESC)
-				`);
-        // Index for listAllRuns pagination
-        sql.exec(`
-					CREATE INDEX IF NOT EXISTS idx_runs_updated 
-					ON runs(updated_at DESC)
-				`);
+          CREATE INDEX IF NOT EXISTS idx_runs_updated
+          ON runs(updated_at DESC)
+        `);
       },
       catch: (error) =>
         new StorageWriteError({

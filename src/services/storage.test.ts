@@ -1,8 +1,7 @@
-import { Effect, Option } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { RunRecord } from "../models/run";
-import type { SessionId, SessionMetadata } from "../models/session";
 import { makeStorageService } from "./storage";
 
 // Mock SQL storage for testing - matches SqlStorage interface
@@ -45,17 +44,8 @@ const createMockSql = () => {
       } else if (query.includes("INSERT") || query.includes("REPLACE")) {
         const key = bindings[0] as string;
         // For runs: (key, session_id, data, updated_at) - data is bindings[2]
-        // For sessions: (key, data, updated_at) - data is bindings[1]
-        const data = query.includes("session_id")
-          ? (bindings[2] as string)
-          : (bindings[1] as string);
+        const data = bindings[2] as string;
         store.set(key, data);
-      } else if (query.includes("SELECT") && query.includes("sessions")) {
-        const key = bindings[0] as string;
-        const data = store.get(key);
-        if (data) {
-          results.push({ key, data } as unknown as T);
-        }
       } else if (query.includes("SELECT") && query.includes("runs")) {
         // Check if this is listAllRuns (no specific run ID or session ID)
         if (query.includes("WHERE 1=1")) {
@@ -105,48 +95,6 @@ const createMockSql = () => {
 };
 
 describe("StorageService", () => {
-  it("should store and retrieve session metadata", async () => {
-    const mockSql = createMockSql();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = makeStorageService(mockSql as any);
-
-    const session: SessionMetadata = {
-      // Cast to branded type for tests - in production, values come from validated input
-      sessionId: "test-session" as SessionId,
-      sandboxId: "test-session",
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-      status: "active",
-      workspacePath: "/workspace",
-      webUiUrl: "https://test.example.com",
-      config: { defaultModel: "claude-sonnet-4-20250514" },
-    };
-
-    const program = Effect.gen(function* () {
-      yield* service.putSession(session);
-      const retrieved = yield* service.getSession("test-session");
-      return retrieved;
-    });
-
-    const result = await Effect.runPromise(program);
-
-    expect(Option.isSome(result)).toBe(true);
-    if (Option.isSome(result)) {
-      expect(result.value.sessionId).toBe("test-session");
-    }
-  });
-
-  it("should return None for non-existent session", async () => {
-    const mockSql = createMockSql();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = makeStorageService(mockSql as any);
-
-    const program = service.getSession("non-existent");
-    const result = await Effect.runPromise(program);
-
-    expect(Option.isNone(result)).toBe(true);
-  });
-
   it("should initialize schema without error", async () => {
     const mockSql = createMockSql();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -154,33 +102,6 @@ describe("StorageService", () => {
 
     const program = service.initSchema();
     await expect(Effect.runPromise(program)).resolves.not.toThrow();
-  });
-
-  it("should delete session", async () => {
-    const mockSql = createMockSql();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = makeStorageService(mockSql as any);
-
-    const session: SessionMetadata = {
-      // Cast to branded type for tests - in production, values come from validated input
-      sessionId: "to-delete" as SessionId,
-      sandboxId: "to-delete",
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-      status: "active",
-      workspacePath: "/workspace",
-      webUiUrl: "https://test.example.com",
-      config: { defaultModel: "claude-sonnet-4-20250514" },
-    };
-
-    const program = Effect.gen(function* () {
-      yield* service.putSession(session);
-      yield* service.deleteSession("to-delete");
-      return yield* service.getSession("to-delete");
-    });
-
-    const result = await Effect.runPromise(program);
-    expect(Option.isNone(result)).toBe(true);
   });
 
   describe("listAllRuns", () => {
