@@ -2,10 +2,12 @@
 import { getSandbox } from "@cloudflare/sandbox";
 import { createOpencodeServer } from "@cloudflare/sandbox/opencode";
 import type { Config } from "@opencode-ai/sdk";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
+import type { SessionMetadata } from "./models/session";
 import { anthropic, createProxyHandler, createProxyToken, github, toContainerUrl } from "./proxy";
+import { makeSessionStorageLayer, SessionStorage } from "./services/session";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 import { ensureSandboxReady } from "./workflows/helpers/sandbox";
 
@@ -74,36 +76,23 @@ function getSessionFromCookie(request: Request): string | null {
 }
 
 /**
- * Session metadata stored in R2
+ * Get session metadata from R2 using the SessionStorage service.
+ * Returns null if session not found or on error.
  */
-interface SessionMetadata {
-  opencodeSessionId?: string;
-  workspacePath?: string;
-  repository?: {
-    url: string;
-    branch?: string;
-  };
-}
-
-/**
- * Get session metadata from R2
- */
-async function getSessionMetadata(
+function getSessionMetadata(
   bucket: R2Bucket,
   sessionId: string,
-): Promise<SessionMetadata | null> {
-  const metadataKey = `sessions/${sessionId}.json`;
-  const metadataObject = await bucket.get(metadataKey);
+): Effect.Effect<SessionMetadata | null> {
+  const layer = makeSessionStorageLayer(bucket);
 
-  if (!metadataObject) {
-    return null;
-  }
-
-  try {
-    return await metadataObject.json<SessionMetadata>();
-  } catch {
-    return null;
-  }
+  return Effect.gen(function* () {
+    const storage = yield* SessionStorage;
+    const result = yield* storage.getSession(sessionId);
+    return Option.getOrNull(result);
+  }).pipe(
+    Effect.provide(layer),
+    Effect.catchAll(() => Effect.succeed(null)),
+  );
 }
 
 /**
@@ -137,7 +126,7 @@ async function proxyToSandbox(
   );
 
   // Get session metadata to know repository info
-  const metadata = await getSessionMetadata(env.SESSIONS_BUCKET, sessionId);
+  const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
 
   // Ensure sandbox is ready (idempotent - checks state before acting)
   const ready = await ensureSandboxReady({
@@ -204,7 +193,7 @@ export default {
       const sessionId = sessionMatch[1];
 
       // Look up session info from R2
-      const metadata = await getSessionMetadata(env.SESSIONS_BUCKET, sessionId);
+      const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
 
       if (!metadata) {
         return new Response(JSON.stringify({ error: "Session not found", sessionId }), {
