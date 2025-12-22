@@ -1,5 +1,5 @@
 // src/workflows/helpers/backup.ts
-import type { Sandbox } from "@cloudflare/sandbox";
+import { collectFile, type Sandbox } from "@cloudflare/sandbox";
 
 /**
  * Restore OpenCode session state from R2 backup.
@@ -50,7 +50,7 @@ export async function restoreSession(
 
 /**
  * Backup OpenCode session state to R2.
- * Uses readFileStream for proper binary handling.
+ * Uses collectFile utility to properly handle SSE-wrapped binary streams.
  */
 export async function backupSession(
   sandbox: Sandbox<unknown>,
@@ -76,32 +76,13 @@ export async function backupSession(
       return;
     }
 
-    // Read file as stream for proper binary handling
+    // Read file using collectFile utility which properly handles SSE-wrapped binary streams
     const fileStream = await sandbox.readFileStream("/tmp/opencode-backup.tar.gz");
-    const reader = fileStream.getReader();
-    const chunks: Uint8Array[] = [];
+    const { content } = await collectFile(fileStream);
 
-    // Read all chunks
-    let done = false;
-    while (!done) {
-      const result = await reader.read();
-      done = result.done;
-      if (result.value) {
-        chunks.push(result.value);
-      }
-    }
-
-    // Combine chunks into single buffer
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const archiveBuffer = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      archiveBuffer.set(chunk, offset);
-      offset += chunk.length;
-    }
-
+    // content is Uint8Array for binary files
     const key = `sessions/${sessionId}/opencode-storage.tar.gz`;
-    await bucket.put(key, archiveBuffer);
+    await bucket.put(key, content);
 
     // Cleanup
     await sandbox.exec("rm -f /tmp/opencode-backup.tar.gz");
