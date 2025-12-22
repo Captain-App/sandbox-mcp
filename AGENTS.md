@@ -165,6 +165,10 @@ Real credentials never enter sandbox. Proxy validates JWT, injects real creds:
 Sandbox → JWT as API key → Proxy → Real credentials → External API
 ```
 
+**Provider support:** Currently hardcoded to Anthropic. To add other providers, see the [Customizing the Provider](./README.md#customizing-the-provider) section in README. The key files are:
+- `src/proxy/services/` - Service configs (target URL, auth injection)
+- `src/workflows/helpers/opencode.ts` - OpenCode config and model selection
+
 ### Workflows for Long Tasks
 
 Durable Objects evict after 70-140s inactivity. Workflows handle tasks up to 50min with automatic retries.

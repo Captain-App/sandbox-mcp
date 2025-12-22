@@ -36,7 +36,7 @@ describe("MCP Tool Schemas", () => {
         repository: "https://github.com/user/repo",
         task: "Add JWT auth",
         branch: "feature/auth",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         title: "JWT auth",
       };
 

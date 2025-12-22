@@ -41,7 +41,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -160,7 +160,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -184,7 +184,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -216,7 +216,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -242,7 +242,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -282,7 +282,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace/1",
         webUiUrl: "https://test1.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const session2: SessionMetadata = {
@@ -293,7 +293,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace/2",
         webUiUrl: "https://test2.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -357,7 +357,7 @@ describe("SessionService (R2)", () => {
           status: "active",
           workspacePath: `/workspace/${i}`,
           webUiUrl: `https://test${i}.example.com`,
-          config: { defaultModel: "claude-sonnet-4-20250514" },
+          config: { defaultModel: "claude-sonnet-4-5" },
         };
         await Effect.runPromise(
           Effect.provide(
@@ -423,7 +423,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const program = Effect.gen(function* () {
@@ -461,7 +461,7 @@ describe("SessionService (R2)", () => {
         status: "active",
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       await Effect.runPromise(

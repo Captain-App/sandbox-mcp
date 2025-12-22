@@ -3,7 +3,7 @@ import { Schema } from "effect";
 /**
  * Default AI model for OpenCode sessions
  */
-export const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+export const DEFAULT_MODEL = "claude-sonnet-4-5";
 
 /**
  * Validation constants for session IDs

@@ -18,6 +18,8 @@ This MCP server solves that with **fire-and-forget task delegation**:
 - Watch progress via web UI or poll for results
 - OpenCode handles the complexity autonomously
 
+> **Note:** By default, this server uses Anthropic as the AI provider. To use other providers (OpenAI, Azure, Google, etc.), see [Customizing the Provider](#customizing-the-provider).
+
 ## Deploy to Cloudflare
 
 ### Prerequisites
@@ -114,6 +116,78 @@ npm run dev:inspect              # With MCP Inspector
 ```
 
 See [AGENTS.md](./AGENTS.md) for architecture details and contribution guidelines.
+
+## Customizing the Provider
+
+By default, sandbox-mcp uses Anthropic with `claude-sonnet-4-5`. To use a different provider:
+
+### Changing the Model (Anthropic)
+
+Edit `src/models/session.ts` and change `DEFAULT_MODEL`:
+
+```typescript
+export const DEFAULT_MODEL = "claude-opus-4-5";  // Change this
+```
+
+### Using a Different Provider
+
+To use a different provider (e.g., OpenAI), you'll need to modify these files:
+
+1. **Add a proxy service** - Create `src/proxy/services/openai.ts`:
+   ```typescript
+   import type { ServiceConfig } from "../types";
+
+   export const openai: ServiceConfig<Env> = {
+     target: "https://api.openai.com/v1",
+     validate: (req) => req.headers.get("authorization")?.replace("Bearer ", ""),
+     transform: async (req, ctx) => {
+       req.headers.set("authorization", `Bearer ${ctx.env.OPENAI_API_KEY}`);
+       return req;
+     },
+   };
+   ```
+
+2. **Register the service** - Export it from `src/proxy/services/index.ts`:
+   ```typescript
+   export { openai } from "./openai";
+   ```
+
+3. **Update OpenCode config** - In `src/workflows/helpers/opencode.ts`, update `buildProxyConfig()`:
+   ```typescript
+   function buildProxyConfig(proxyBaseUrl: string, proxyToken: string): Config {
+     const containerProxyUrl = toContainerUrl(proxyBaseUrl);
+     return {
+       provider: {
+         openai: {
+           options: {
+             apiKey: proxyToken,
+             baseURL: `${containerProxyUrl}/proxy/openai`,
+           },
+         },
+       },
+     };
+   }
+   ```
+
+4. **Update task execution** - In the same file, change `providerID` in `executeTask()`:
+   ```typescript
+   model: {
+     providerID: "openai",  // Change from "anthropic"
+     modelID: params.model,
+   },
+   ```
+
+5. **Add the secret**:
+   ```bash
+   wrangler secret put OPENAI_API_KEY
+   ```
+
+6. **Update the default model** - In `src/models/session.ts`:
+   ```typescript
+   export const DEFAULT_MODEL = "gpt-5.2";  // OpenAI model
+   ```
+
+See the [OpenCode provider documentation](https://opencode.ai/docs/providers) for supported providers and their configuration.
 
 ## License
 

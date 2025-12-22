@@ -68,7 +68,7 @@ describe("Run Model", () => {
         status: "running",
         task: "Add authentication to the API",
         title: "Add auth",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         startedAt: Date.now(),
       };
 
@@ -87,7 +87,7 @@ describe("Run Model", () => {
         status: "completed",
         task: "Add README",
         title: "Add README",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         startedAt: Date.now() - 60000,
         completedAt: Date.now(),
         result: {
@@ -111,7 +111,7 @@ describe("Run Model", () => {
         status: "failed",
         task: "Do something",
         title: "Failed task",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         startedAt: Date.now() - 60000,
         completedAt: Date.now(),
         result: {
@@ -136,7 +136,7 @@ describe("Run Model", () => {
         status: "started",
         task: "Test task",
         // missing title
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         startedAt: Date.now(),
       };
 

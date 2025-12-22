@@ -13,7 +13,7 @@ describe("Session Model", () => {
       workspacePath: "/workspace",
       webUiUrl: "https://my-session-123.sandbox.example.com",
       config: {
-        defaultModel: "claude-sonnet-4-20250514",
+        defaultModel: "claude-sonnet-4-5",
       },
     };
 
@@ -32,7 +32,7 @@ describe("Session Model", () => {
       status: "active",
       workspacePath: "/workspace",
       webUiUrl: "https://test.example.com",
-      config: { defaultModel: "claude-sonnet-4-20250514" },
+      config: { defaultModel: "claude-sonnet-4-5" },
     };
 
     expect(() => Schema.decodeUnknownSync(SessionMetadata)(input)).toThrow();
@@ -51,7 +51,7 @@ describe("Session Model", () => {
         url: "https://github.com/user/repo",
         branch: "main",
       },
-      config: { defaultModel: "claude-sonnet-4-20250514" },
+      config: { defaultModel: "claude-sonnet-4-5" },
     };
 
     const result = Schema.decodeUnknownSync(SessionMetadata)(input);
@@ -71,7 +71,7 @@ describe("Session Model", () => {
         status,
         workspacePath: "/workspace",
         webUiUrl: "https://test.example.com",
-        config: { defaultModel: "claude-sonnet-4-20250514" },
+        config: { defaultModel: "claude-sonnet-4-5" },
       };
 
       const result = Schema.decodeUnknownSync(SessionMetadata)(input);
