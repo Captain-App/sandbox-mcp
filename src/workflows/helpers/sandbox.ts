@@ -40,9 +40,9 @@ interface SandboxReadyResult {
  * This is the main entry point for sandbox initialization. It checks the
  * current state and only performs actions that are needed:
  *
- * 1. Restores OpenCode backup if storage directory is missing
- * 2. Clones repository if .git directory is missing
- * 3. Configures proxy if environment is not set up
+ * 1. Configures proxy if environment is not set up (MUST be first for git auth)
+ * 2. Restores OpenCode backup if storage directory is missing
+ * 3. Clones repository if .git directory is missing
  *
  * Safe to call multiple times - each step checks before acting.
  * Used by both workflow (execute-task.ts) and web UI (index.ts).
@@ -57,7 +57,18 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     configuredProxy: false,
   };
 
-  // 1. Check & restore OpenCode backup
+  // 1. Check & configure proxy FIRST (required for git clone to authenticate)
+  // Check if ANTHROPIC_BASE_URL is set in the environment
+  const proxyCheck = await sandbox.exec(
+    "grep -q ANTHROPIC_BASE_URL /workspace/.env 2>/dev/null && echo exists || echo missing",
+  );
+  if (proxyCheck.stdout.trim() === "missing") {
+    await configureSandboxProxy(sandbox, proxyBaseUrl, proxyToken);
+    await setupGitConfig(sandbox);
+    result.configuredProxy = true;
+  }
+
+  // 2. Check & restore OpenCode backup
   const storageCheck = await sandbox.exec(
     "test -d ~/.local/share/opencode/storage && echo exists || echo missing",
   );
@@ -66,7 +77,7 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     result.restoredBackup = restored;
   }
 
-  // 2. Check & clone repository
+  // 3. Check & clone repository (now proxy is configured for git auth)
   if (repository) {
     const repoName = getRepoName(repository.url);
     const targetDir = `/workspace/${repoName}`;
@@ -80,17 +91,6 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     }
 
     result.workspacePath = targetDir;
-  }
-
-  // 3. Check & configure proxy
-  // Check if ANTHROPIC_BASE_URL is set in the environment
-  const proxyCheck = await sandbox.exec(
-    "grep -q ANTHROPIC_BASE_URL /workspace/.env 2>/dev/null && echo exists || echo missing",
-  );
-  if (proxyCheck.stdout.trim() === "missing") {
-    await configureSandboxProxy(sandbox, proxyBaseUrl, proxyToken);
-    await setupGitConfig(sandbox);
-    result.configuredProxy = true;
   }
 
   return result;
