@@ -11,7 +11,7 @@ import { makeSessionStorageLayer, SessionStorage } from "./services/session";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 import { ensureSandboxReady } from "./workflows/helpers/sandbox";
 
-// Export Sandbox class from @cloudflare/sandbox (required for containers)
+// Export Sandbox class from @cloudflare/sandbox
 export { Sandbox } from "@cloudflare/sandbox";
 
 // Export Durable Object and Workflow classes

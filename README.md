@@ -1,6 +1,6 @@
 # sandbox-mcp
 
-An MCP server that enables AI assistants to delegate complex, long-running coding tasks to [OpenCode](https://opencode.ai) running in secure Cloudflare Sandboxes.
+An MCP server that enables AI assistants to delegate complex, long-running coding tasks to [OpenCode](https://opencode.ai) running in secure [Cloudflare Sandboxes](https://github.com/cloudflare/sandbox-sdk).
 
 ## The Problem
 
@@ -25,9 +25,9 @@ An MCP server that provides async task delegation to an autonomous coding agent:
 ### Prerequisites
 
 - Node.js 20+
-- Cloudflare account with Workers, R2, and Containers enabled
-- Anthropic API key
-- GitHub token (for git operations)
+- [Cloudflare account](https://dash.cloudflare.com/sign-up) with Workers, R2, and [Containers](https://developers.cloudflare.com/containers/) enabled
+- [Anthropic API key](https://console.anthropic.com/)
+- [GitHub token](https://github.com/settings/tokens) (for git operations)
 
 ### Setup
 
@@ -52,9 +52,6 @@ PROXY_JWT_SECRET=your-secret-for-signing-tokens
 PROXY_BASE_URL=http://localhost:8787
 ANTHROPIC_API_KEY=sk-ant-xxx
 GITHUB_TOKEN=ghp_xxx
-R2_ACCESS_KEY_ID=xxx
-R2_SECRET_ACCESS_KEY=xxx
-R2_ENDPOINT=https://xxx.r2.cloudflarestorage.com
 ```
 
 4. Start development server:
@@ -123,56 +120,6 @@ List past task runs with optional filters.
 
 **Returns:** `{ runs: [...], hasMore }`
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     MCP Client (Claude, etc.)                    │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ MCP Protocol
-┌────────────────────────────▼────────────────────────────────────┐
-│                   Cloudflare Worker                              │
-│  Routes: /mcp, /proxy/*, /session/{id}/                          │
-└────────────────────────────┬────────────────────────────────────┘
-         │                   │                    │
-    ┌────▼────┐       ┌──────▼──────┐      ┌─────▼─────┐
-    │ Proxy   │       │ MCP Agent   │      │ Web UI    │
-    │ Handler │       │    (DO)     │      │ Proxy     │
-    └────┬────┘       └──────┬──────┘      └─────┬─────┘
-         │                   │                    │
-         │           ┌───────▼───────┐           │
-         │           │   Workflow    │           │
-         │           └───────┬───────┘           │
-         │                   │                   │
-    ┌────▼───────────────────▼───────────────────▼────┐
-    │                 Cloudflare Sandbox               │
-    │   ┌─────────────────────────────────────────┐   │
-    │   │           OpenCode Agent                 │   │
-    │   │  - Autonomous coding                     │   │
-    │   │  - Git operations                        │   │
-    │   │  - Web UI on port 4096                   │   │
-    │   └─────────────────────────────────────────┘   │
-    └─────────────────────────────────────────────────┘
-```
-
-### Key Components
-
-| Component | Purpose |
-|-----------|---------|
-| **Worker** | HTTP routing, MCP endpoint, proxy |
-| **MCP Agent (DO)** | Protocol handling, tool implementation |
-| **Workflow** | Long-running task orchestration (up to 50min) |
-| **Sandbox** | Isolated container running OpenCode |
-| **R2** | Session metadata, workspace persistence |
-
-### Zero-Trust Proxy
-
-Real credentials never enter the sandbox. All external API calls (Anthropic, GitHub, R2) go through the proxy:
-
-1. MCP Agent creates short-lived JWT with sandboxId/sessionId
-2. Sandbox uses JWT as "API key" for external calls
-3. Proxy validates JWT, injects real credentials, forwards request
-
 ## Development
 
 ### Scripts
@@ -185,32 +132,11 @@ npm run check        # Full CI check (typecheck + lint + test)
 npm run deploy       # Deploy to Cloudflare
 ```
 
-### Project Structure
-
-```
-src/
-├── index.ts              # Worker entry point, routing
-├── agent/
-│   └── mcp-agent.ts      # MCP protocol handler (Durable Object)
-├── workflows/
-│   └── execute-task.ts   # Task execution workflow
-├── proxy/
-│   ├── handler.ts        # Zero-trust proxy
-│   └── services/         # Service-specific proxy logic
-├── services/
-│   ├── session.ts        # R2 session storage
-│   └── run.ts            # R2 run storage
-└── models/
-    ├── session.ts        # Session schema
-    ├── run.ts            # Run record schema
-    └── errors.ts         # Typed errors
-```
-
 ### Testing
 
 ```bash
-npm run test              # Run all tests
-npm run test:watch        # Watch mode
+npm run test             # Run all tests
+npm run test -- --watch  # Watch mode
 ```
 
 Tests use Vitest with mock layers for Effect services.
@@ -223,9 +149,6 @@ Tests use Vitest with mock layers for Effect services.
 wrangler secret put PROXY_JWT_SECRET
 wrangler secret put ANTHROPIC_API_KEY
 wrangler secret put GITHUB_TOKEN
-wrangler secret put R2_ACCESS_KEY_ID
-wrangler secret put R2_SECRET_ACCESS_KEY
-wrangler secret put R2_ENDPOINT
 wrangler secret put PROXY_BASE_URL
 ```
 
@@ -245,20 +168,14 @@ npm run deploy
 | `PROXY_BASE_URL` | Public URL of this worker |
 | `ANTHROPIC_API_KEY` | Anthropic API key for OpenCode |
 | `GITHUB_TOKEN` | GitHub PAT for git operations |
-| `R2_ACCESS_KEY_ID` | R2 access key |
-| `R2_SECRET_ACCESS_KEY` | R2 secret key |
-| `R2_ENDPOINT` | R2 S3-compatible endpoint URL |
 
-### Cloudflare Bindings
+## Contributing
 
-Configured in `wrangler.jsonc`:
+Contributions are welcome! Please read [AGENTS.md](./AGENTS.md) for guidelines on code style, architecture decisions, and common tasks.
 
-| Binding | Type | Purpose |
-|---------|------|---------|
-| `MCP_AGENT` | Durable Object | MCP protocol handler |
-| `Sandbox` | Durable Object | Container instances |
-| `SESSIONS_BUCKET` | R2 Bucket | Session/workspace storage |
-| `EXECUTE_TASK_WORKFLOW` | Workflow | Task execution |
+```bash
+npm run check  # Run before submitting PRs
+```
 
 ## License
 

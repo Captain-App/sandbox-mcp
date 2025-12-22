@@ -1,10 +1,52 @@
 # AGENTS.md
 
-Guidelines for AI agents working on this codebase.
+Guidelines for AI agents and human contributors working on this codebase.
 
 ## Project Overview
 
 This is an MCP server that delegates coding tasks to OpenCode running in Cloudflare Sandboxes. It's built on Cloudflare Workers with Durable Objects, Workflows, Containers, and R2.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     MCP Client (Claude, etc.)                    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ MCP Protocol
+┌────────────────────────────▼────────────────────────────────────┐
+│                   Cloudflare Worker                              │
+│  Routes: /mcp, /proxy/*, /session/{id}/                          │
+└────────────────────────────┬────────────────────────────────────┘
+         │                   │                    │
+    ┌────▼────┐       ┌──────▼──────┐      ┌─────▼─────┐
+    │ Proxy   │       │ MCP Agent   │      │ Web UI    │
+    │ Handler │       │    (DO)     │      │ Proxy     │
+    └────┬────┘       └──────┬──────┘      └─────┬─────┘
+         │                   │                    │
+         │           ┌───────▼───────┐           │
+         │           │   Workflow    │           │
+         │           └───────┬───────┘           │
+         │                   │                   │
+    ┌────▼───────────────────▼───────────────────▼────┐
+    │                 Cloudflare Sandbox               │
+    │   ┌─────────────────────────────────────────┐   │
+    │   │           OpenCode Agent                 │   │
+    │   │  - Autonomous coding                     │   │
+    │   │  - Git operations                        │   │
+    │   │  - Web UI on port 4096                   │   │
+    │   └─────────────────────────────────────────┘   │
+    └─────────────────────────────────────────────────┘
+```
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| **Worker** | HTTP routing, MCP endpoint, proxy |
+| **MCP Agent (DO)** | Protocol handling, tool implementation |
+| **Workflow** | Long-running task orchestration (up to 50min) |
+| **Sandbox** | Isolated container running OpenCode |
+| **R2** | Session metadata, workspace persistence |
 
 ## Tech Stack
 
@@ -90,6 +132,17 @@ export const myToolInputSchema = {
 
 ## Architecture Decisions
 
+### Cloudflare Bindings
+
+Configured in `wrangler.jsonc`:
+
+| Binding | Type | Purpose |
+|---------|------|---------|
+| `MCP_AGENT` | Durable Object | MCP protocol handler |
+| `Sandbox` | Durable Object | Container instances |
+| `SESSIONS_BUCKET` | R2 Bucket | Session/workspace storage |
+| `EXECUTE_TASK_WORKFLOW` | Workflow | Task execution |
+
 ### Storage Layout
 
 All data is stored in R2 for cross-DO access. Key patterns are defined in `src/storage/keys.ts`:
@@ -116,6 +169,18 @@ Sandbox → JWT as API key → Proxy → Real credentials → External API
 
 Durable Objects evict after 70-140s inactivity. Workflows handle tasks up to 50min with automatic retries.
 
+### Session Restoration
+
+OpenCode state is persisted to R2 and restored when sandboxes restart:
+
+1. **Backup**: After each task, `~/.local/share/opencode/storage` is tarred and saved to R2
+2. **Restore**: `ensureSandboxReady()` in `src/workflows/helpers/sandbox.ts` handles idempotent initialization:
+   - Configures proxy (for git auth)
+   - Restores OpenCode backup from R2
+   - Clones repository if needed
+
+This allows sessions to survive sandbox eviction and be resumed from any entry point (MCP tool or web UI).
+
 ## File Organization
 
 ```
@@ -126,14 +191,18 @@ src/
 │   └── tools.ts          # Tool schemas and formatters
 ├── workflows/
 │   ├── execute-task.ts   # Main workflow
-│   └── helpers/          # Workflow step implementations
+│   └── helpers/
+│       ├── backup.ts     # Session backup/restore to R2
+│       ├── opencode.ts   # OpenCode SDK integration
+│       ├── run.ts        # Run record management
+│       └── sandbox.ts    # Sandbox initialization
 ├── proxy/
 │   ├── handler.ts        # Proxy routing
 │   ├── token.ts          # JWT creation/verification
 │   └── services/         # Per-service proxy logic
 ├── services/
-│   ├── session.ts        # R2 session storage (Effect service)
-│   └── run.ts            # R2 run storage (Effect service)
+│   ├── session.ts        # R2 session storage
+│   └── run.ts            # R2 run storage
 └── models/
     ├── session.ts        # SessionMetadata schema
     ├── run.ts            # RunRecord schema
