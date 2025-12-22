@@ -3,21 +3,27 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as Effect from "effect/Effect";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import { Schema } from "effect";
 
-import { isSessionError, isStorageError } from "../models/errors";
+import {
+  isSessionError,
+  isStorageError,
+  RunNotFoundError,
+  SessionNotFoundError,
+} from "../models/errors";
 import type { RunRecord } from "../models/run";
-import type { SessionMetadata } from "../models/session";
+import { SessionId, type SessionMetadata } from "../models/session";
 import { createProxyToken } from "../proxy";
 import { makeStorageLayer, StorageService, type SqlStorageInterface } from "../services/storage";
 import { ToolCallEventBuilder } from "../services/telemetry";
 import {
-  createSessionInputSchema,
   formatErrorResponse,
   formatToolResponse,
-  getStatusInputSchema,
+  getResultInputSchema,
+  listRunsInputSchema,
   runTaskInputSchema,
-  type CreateSessionInput,
-  type GetStatusInput,
+  type GetResultInput,
+  type ListRunsInput,
   type RunTaskInput,
 } from "./tools";
 
@@ -132,10 +138,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       }),
     );
 
-    // Register tools using the recommended registerTool() method
-    this.registerCreateSessionTool();
+    // Register tools - NEW ORDER (removed create_session)
     this.registerRunTaskTool();
-    this.registerGetStatusTool();
+    this.registerGetResultTool();
+    this.registerListRunsTool();
 
     this.setState({ initialized: true });
   }
@@ -158,181 +164,143 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
-   * Tool: opencode_create_session
-   * Uses registerTool() with proper Zod schema format
+   * Build the absolute web UI URL for a session.
+   * Uses PROXY_BASE_URL as the base since the same worker serves both MCP and web UI.
    */
-  private registerCreateSessionTool(): void {
-    this.server.registerTool(
-      "opencode_create_session",
-      {
-        description: "Create or resume an OpenCode coding session in a sandbox",
-        inputSchema: createSessionInputSchema,
-      },
-      async (params: CreateSessionInput) => {
-        const telemetry = new ToolCallEventBuilder(
-          "opencode_create_session",
-          params.sessionId ?? "new",
-        );
-        telemetry.startPhase("validate");
-
-        try {
-          const rt = getRuntime(this.runtime);
-          const sessionId = params.sessionId ?? crypto.randomUUID().slice(0, 8);
-
-          telemetry.endPhase("validate");
-          telemetry.startPhase("storage");
-
-          // Check if session exists (resume)
-          const existing = await rt.runPromise(
-            Effect.gen(function* () {
-              const storage = yield* StorageService;
-              return yield* storage.getSession(sessionId);
-            }),
-          );
-
-          if (existing._tag === "Some") {
-            telemetry.setMetadata({ action: "resume" });
-            this.emitToolTelemetry(telemetry, true);
-            return formatToolResponse({
-              sessionId: existing.value.sessionId,
-              sandboxId: existing.value.sandboxId,
-              webUiUrl: existing.value.webUiUrl,
-              status: "resumed",
-              workspacePath: existing.value.workspacePath,
-              repository: existing.value.repository,
-            });
-          }
-
-          // Create session metadata
-          const webUiUrl = `/session/${sessionId}/`;
-
-          const session: SessionMetadata = {
-            sessionId: sessionId as SessionMetadata["sessionId"],
-            sandboxId: sessionId,
-            createdAt: Date.now(),
-            lastActivity: Date.now(),
-            status: "idle",
-            workspacePath: "/workspace",
-            webUiUrl,
-            repository: params.repositoryUrl
-              ? {
-                  url: params.repositoryUrl,
-                  branch: params.branch ?? "main",
-                }
-              : undefined,
-            title: params.title,
-            config: {
-              defaultModel: "claude-sonnet-4-20250514",
-            },
-          };
-
-          await rt.runPromise(
-            Effect.gen(function* () {
-              const storage = yield* StorageService;
-              yield* storage.putSession(session);
-            }),
-          );
-
-          telemetry.endPhase("storage");
-          telemetry.setMetadata({ action: "create" });
-          this.emitToolTelemetry(telemetry, true);
-
-          return formatToolResponse({
-            sessionId: session.sessionId,
-            sandboxId: session.sandboxId,
-            webUiUrl: session.webUiUrl,
-            status: "created",
-            workspacePath: session.workspacePath,
-            repository: session.repository,
-          });
-        } catch (error) {
-          const errorName = error instanceof Error ? error.name : "UnknownError";
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          telemetry.setError({
-            type: errorName,
-            code: errorName,
-            message: errorMessage,
-            retriable: false,
-          });
-          this.emitToolTelemetry(telemetry, false);
-          return formatDomainError(error);
-        }
-      },
-    );
+  private getWebUiUrl(sessionId: string): string {
+    return `${this.env.PROXY_BASE_URL}/session/${sessionId}/`;
   }
 
   /**
    * Tool: opencode_run_task
+   * Execute a coding task. Creates session if needed, or continues existing session.
    */
   private registerRunTaskTool(): void {
     this.server.registerTool(
       "opencode_run_task",
       {
-        description: "Execute a coding task asynchronously in an OpenCode session",
+        description:
+          "Execute a coding task in a sandbox. Creates session if needed, or continues existing session.",
         inputSchema: runTaskInputSchema,
       },
       async (params: RunTaskInput) => {
-        const telemetry = new ToolCallEventBuilder("opencode_run_task", params.sessionId);
+        const telemetry = new ToolCallEventBuilder("opencode_run_task", params.sessionId ?? "new");
         telemetry.startPhase("validate");
 
         try {
           const rt = getRuntime(this.runtime);
+          let session: SessionMetadata;
+          let isNewSession = false;
 
-          // Verify session exists
-          const session = await rt.runPromise(
-            Effect.gen(function* () {
-              const storage = yield* StorageService;
-              return yield* storage.getSession(params.sessionId);
-            }),
-          );
+          // 1. Resolve or create session
+          if (params.sessionId) {
+            // Continue existing session
+            telemetry.endPhase("validate");
+            telemetry.startPhase("storage");
 
-          if (session._tag === "None") {
-            telemetry.setError({
-              type: "SessionNotFoundError",
-              code: "SESSION_NOT_FOUND",
-              message: `Session "${params.sessionId}" not found`,
-              retriable: false,
-            });
-            this.emitToolTelemetry(telemetry, false);
-            return formatErrorResponse({
-              code: "SESSION_NOT_FOUND",
-              message: `Session "${params.sessionId}" not found`,
-            });
+            const existing = await rt.runPromise(
+              Effect.gen(function* () {
+                const storage = yield* StorageService;
+                return yield* storage.getSession(params.sessionId!);
+              }),
+            );
+
+            if (existing._tag === "None") {
+              const error = new SessionNotFoundError({ sessionId: params.sessionId! });
+              telemetry.setError({
+                type: error._tag,
+                code: error._tag,
+                message: error.message,
+                retriable: false,
+              });
+              this.emitToolTelemetry(telemetry, false);
+              return formatDomainError(error);
+            }
+            session = existing.value;
+          } else {
+            // Create new session
+            isNewSession = true;
+            // Generate a short session ID from UUID (8 hex chars, always lowercase alphanumeric)
+            const rawSessionId = crypto.randomUUID().slice(0, 8);
+            // Validate through Schema to get properly branded type
+            const sessionId = Schema.decodeSync(SessionId)(rawSessionId);
+
+            session = {
+              sessionId,
+              sandboxId: sessionId,
+              createdAt: Date.now(),
+              lastActivity: Date.now(),
+              status: "active",
+              workspacePath: "/workspace",
+              webUiUrl: this.getWebUiUrl(sessionId),
+              repository: params.repository
+                ? {
+                    url: params.repository,
+                    branch: params.branch ?? "main",
+                  }
+                : undefined,
+              clonedRepos: params.repository ? [params.repository] : [],
+              config: {
+                defaultModel: "claude-sonnet-4-20250514",
+              },
+            };
+
+            telemetry.endPhase("validate");
+            telemetry.startPhase("storage");
+
+            await rt.runPromise(
+              Effect.gen(function* () {
+                const storage = yield* StorageService;
+                yield* storage.putSession(session);
+              }),
+            );
           }
 
-          telemetry.endPhase("validate");
+          // 2. Check if additional repo needs cloning
+          const needsClone = params.repository && !session.clonedRepos?.includes(params.repository);
+
+          // Update clonedRepos if we're adding a new repo
+          if (needsClone && params.repository) {
+            session = {
+              ...session,
+              clonedRepos: [...(session.clonedRepos ?? []), params.repository],
+            };
+          }
+
+          telemetry.endPhase("storage");
           telemetry.startPhase("token");
 
+          // 3. Create run record
           const runId = `run-${crypto.randomUUID().slice(0, 8)}`;
           const doId = this.agentContext.ctx.id.toString();
+          const model = params.model ?? session.config.defaultModel;
 
           // Create proxy token for zero-trust authentication
-          // The token is passed to the workflow instead of real credentials
           const proxyToken = await rt.runPromise(
             createProxyToken({
               secret: this.env.PROXY_JWT_SECRET,
-              sandboxId: session.value.sandboxId,
-              sessionId: params.sessionId,
-              expiresIn: "2h", // Long enough for task execution
+              sandboxId: session.sandboxId,
+              sessionId: session.sessionId,
+              expiresIn: "2h",
             }),
           );
 
           telemetry.endPhase("token");
           telemetry.startPhase("workflow");
 
-          // Create workflow to execute task
-          // Note: Only JWT token is passed, not real credentials
+          // 4. Create workflow to execute task
           const workflowInstance = await this.env.EXECUTE_TASK_WORKFLOW.create({
             id: runId,
             params: {
-              sessionId: params.sessionId,
-              sandboxId: session.value.sandboxId,
+              sessionId: session.sessionId,
+              sandboxId: session.sandboxId,
               task: params.task,
-              model: params.model ?? session.value.config.defaultModel,
+              model,
               runId,
               doId,
-              repositoryUrl: session.value.repository?.url,
-              branch: session.value.repository?.branch,
+              repositoryUrl: needsClone ? params.repository : session.repository?.url,
+              branch: params.branch ?? session.repository?.branch,
+              existingOpencodeSessionId: session.opencodeSessionId,
               proxyToken,
               proxyBaseUrl: this.env.PROXY_BASE_URL,
             },
@@ -341,17 +309,16 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           telemetry.endPhase("workflow");
           telemetry.startPhase("storage");
 
-          // Create run record
+          // 5. Create run record
           const run: RunRecord = {
             runId,
-            sessionId: params.sessionId,
+            sessionId: session.sessionId,
             workflowId: workflowInstance.id,
-            status: "queued",
+            status: "started",
             task: params.task,
-            model: params.model ?? session.value.config.defaultModel,
+            title: params.title ?? "Processing...", // Placeholder until OpenCode generates
+            model,
             startedAt: Date.now(),
-            retryCount: 0,
-            maxRetries: 3,
           };
 
           await rt.runPromise(
@@ -366,7 +333,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             Effect.gen(function* () {
               const storage = yield* StorageService;
               yield* storage.putSession({
-                ...session.value,
+                ...session,
                 lastActivity: Date.now(),
                 status: "active",
               });
@@ -374,15 +341,19 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           );
 
           telemetry.endPhase("storage");
-          telemetry.setMetadata({ runId, workflowId: workflowInstance.id });
+          telemetry.setMetadata({
+            runId,
+            workflowId: workflowInstance.id,
+            isNewSession,
+            needsClone,
+          });
           this.emitToolTelemetry(telemetry, true);
 
           return formatToolResponse({
             runId,
-            workflowId: workflowInstance.id,
+            sessionId: session.sessionId,
             status: "started",
-            webUiUrl: session.value.webUiUrl,
-            message: "Task started. Use opencode_get_status to check progress.",
+            webUiUrl: session.webUiUrl,
           });
         } catch (error) {
           const errorName = error instanceof Error ? error.name : "UnknownError";
@@ -401,86 +372,63 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
-   * Tool: opencode_get_status
+   * Tool: opencode_get_result
+   * Get the status and result of a specific task run.
    */
-  private registerGetStatusTool(): void {
+  private registerGetResultTool(): void {
     this.server.registerTool(
-      "opencode_get_status",
+      "opencode_get_result",
       {
-        description: "Check the status of a session and optionally a specific task run",
-        inputSchema: getStatusInputSchema,
+        description: "Get the status and result of a specific task run.",
+        inputSchema: getResultInputSchema,
       },
-      async (params: GetStatusInput) => {
-        const telemetry = new ToolCallEventBuilder("opencode_get_status", params.sessionId);
+      async (params: GetResultInput) => {
+        const telemetry = new ToolCallEventBuilder("opencode_get_result", params.runId);
         telemetry.startPhase("storage");
 
         try {
           const rt = getRuntime(this.runtime);
 
-          const session = await rt.runPromise(
+          const run = await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
-              return yield* storage.getSession(params.sessionId);
+              return yield* storage.getRun(params.runId);
             }),
           );
 
-          if (session._tag === "None") {
+          if (run._tag === "None") {
+            const error = new RunNotFoundError({ runId: params.runId });
             telemetry.setError({
-              type: "SessionNotFoundError",
-              code: "SESSION_NOT_FOUND",
-              message: `Session "${params.sessionId}" not found`,
+              type: error._tag,
+              code: error._tag,
+              message: error.message,
               retriable: false,
             });
             this.emitToolTelemetry(telemetry, false);
-            return formatErrorResponse({
-              code: "SESSION_NOT_FOUND",
-              message: `Session "${params.sessionId}" not found`,
-            });
+            return formatDomainError(error);
           }
 
-          // Get recent runs
-          const runs = await rt.runPromise(
+          // Get session for webUiUrl
+          const session = await rt.runPromise(
             Effect.gen(function* () {
               const storage = yield* StorageService;
-              return yield* storage.listRuns(params.sessionId, 10);
+              return yield* storage.getSession(run.value.sessionId);
             }),
           );
 
-          // Get specific run if requested
-          let currentRun: RunRecord | undefined;
-          if (params.runId) {
-            const runId = params.runId;
-            const run = await rt.runPromise(
-              Effect.gen(function* () {
-                const storage = yield* StorageService;
-                return yield* storage.getRun(runId);
-              }),
-            );
-            if (run._tag === "Some") {
-              currentRun = run.value;
-            }
-          }
-
           telemetry.endPhase("storage");
-          telemetry.setMetadata({ runsCount: runs.length });
           this.emitToolTelemetry(telemetry, true);
 
           return formatToolResponse({
-            sessionId: session.value.sessionId,
-            webUiUrl: session.value.webUiUrl,
-            status: session.value.status,
-            workspacePath: session.value.workspacePath,
-            createdAt: session.value.createdAt,
-            lastActivity: session.value.lastActivity,
-            repository: session.value.repository,
-            recentRuns: runs.map((r) => ({
-              runId: r.runId,
-              status: r.status,
-              task: r.task.slice(0, 100) + (r.task.length > 100 ? "..." : ""),
-              startedAt: r.startedAt,
-              completedAt: r.completedAt,
-            })),
-            ...(currentRun && { currentRun }),
+            runId: run.value.runId,
+            sessionId: run.value.sessionId,
+            status: run.value.status,
+            task: run.value.task,
+            title: run.value.title,
+            startedAt: run.value.startedAt,
+            completedAt: run.value.completedAt,
+            result: run.value.result,
+            webUiUrl: session._tag === "Some" ? session.value.webUiUrl : undefined,
           });
         } catch (error) {
           const errorName = error instanceof Error ? error.name : "UnknownError";
@@ -499,8 +447,78 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   }
 
   /**
-   * Ensure runtime is initialized.
+   * Tool: opencode_list_runs
+   * List past task runs with filtering and pagination.
+   */
+  private registerListRunsTool(): void {
+    this.server.registerTool(
+      "opencode_list_runs",
+      {
+        description: "List past task runs. Use to discover old work or see history.",
+        inputSchema: listRunsInputSchema,
+      },
+      async (params: ListRunsInput) => {
+        const telemetry = new ToolCallEventBuilder("opencode_list_runs", "list");
+        telemetry.startPhase("storage");
+
+        try {
+          const rt = getRuntime(this.runtime);
+          const limit = params.limit ?? 10;
+
+          const runs = await rt.runPromise(
+            Effect.gen(function* () {
+              const storage = yield* StorageService;
+              return yield* storage.listAllRuns({
+                sessionId: params.sessionId,
+                status: params.status,
+                limit: limit + 1, // Fetch one extra to check hasMore
+                before: params.before,
+              });
+            }),
+          );
+
+          const hasMore = runs.length > limit;
+          const returnRuns = hasMore ? runs.slice(0, limit) : runs;
+
+          telemetry.endPhase("storage");
+          telemetry.setMetadata({ runsCount: returnRuns.length, hasMore });
+          this.emitToolTelemetry(telemetry, true);
+
+          return formatToolResponse({
+            runs: returnRuns.map((r) => ({
+              runId: r.runId,
+              sessionId: r.sessionId,
+              status: r.status,
+              title: r.title,
+              task: r.task.length > 100 ? r.task.slice(0, 100) + "..." : r.task,
+              startedAt: r.startedAt,
+              completedAt: r.completedAt,
+              success: r.result?.success,
+            })),
+            hasMore,
+          });
+        } catch (error) {
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
+          return formatDomainError(error);
+        }
+      },
+    );
+  }
+
+  /**
+   * Ensure runtime is initialized with schema.
    * Used for RPC methods that may be called before init().
+   *
+   * Note: Durable Objects serialize requests, so there's no race condition here.
+   * If onTaskComplete arrives before init(), we need to ensure the schema exists.
    */
   private ensureRuntime(): ManagedRuntime.ManagedRuntime<StorageService, never> {
     if (this.runtime === null) {
@@ -508,6 +526,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       const sql = this.agentContext.ctx.storage.sql;
       const storage = makeStorageLayer(sql);
       this.runtime = ManagedRuntime.make(storage);
+
+      // Initialize schema synchronously - required for DB operations
+      this.runtime.runSync(
+        Effect.gen(function* () {
+          const storageService = yield* StorageService;
+          yield* storageService.initSchema();
+        }),
+      );
     }
     return this.runtime;
   }
@@ -521,16 +547,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     result: {
       success: boolean;
       output?: string;
-      toolOutputs?: Array<{
-        tool: string;
-        title?: string;
-        output?: string;
-      }>;
       error?: string;
-      filesCreated: string[];
-      filesModified: string[];
-      commits: string[];
-      branch?: string;
+      title?: string;
+      opencodeSessionId?: string;
       tokens?: {
         input: number;
         output: number;
@@ -548,13 +567,31 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         const existing = yield* storage.getRun(params.runId);
 
         if (existing._tag === "Some") {
+          // Update run with result
           const updated: RunRecord = {
             ...existing.value,
             status: params.result.success ? "completed" : "failed",
             completedAt: Date.now(),
-            result: params.result,
+            title: params.result.title ?? existing.value.title,
+            result: {
+              success: params.result.success,
+              output: params.result.output ?? "",
+              error: params.result.error,
+            },
           };
           yield* storage.putRun(updated);
+
+          // Update session with opencodeSessionId for continuation
+          if (params.result.opencodeSessionId) {
+            const session = yield* storage.getSession(existing.value.sessionId);
+            if (session._tag === "Some") {
+              yield* storage.putSession({
+                ...session.value,
+                opencodeSessionId: params.result.opencodeSessionId,
+                lastActivity: Date.now(),
+              });
+            }
+          }
         }
       }),
     );

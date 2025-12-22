@@ -8,50 +8,40 @@ import type {
   OpenCodePart,
   OpenCodePromptResponse,
   OpenCodeSessionCreateResponse,
+  OpenCodeSessionGetResponse,
   OpenCodeSessionListResponse,
   OpenCodeTaskResult,
   TaskParams,
 } from "./types";
 
 /**
- * Extract meaningful content from OpenCode response parts.
- *
- * Extracts:
- * - Text parts: The AI's explanations and summaries
- * - Tool outputs: Results from bash commands, file reads, etc.
+ * Extract text output from OpenCode response parts.
+ * We now use unstructured output - the AI's natural language response.
  */
-function extractResponseContent(parts: OpenCodePart[]): {
-  textOutput: string;
-  toolOutputs: Array<{ tool: string; title?: string; output?: string }>;
-} {
+function extractTextOutput(parts: OpenCodePart[]): string {
   const textParts: string[] = [];
-  const toolOutputs: Array<{ tool: string; title?: string; output?: string }> = [];
 
   for (const part of parts) {
     if (part.type === "text" && part.text) {
       textParts.push(part.text);
-    } else if (part.type === "tool" && part.tool && part.state) {
-      // Only include completed tool calls with output
-      if (part.state.status === "completed" && part.state.output) {
-        toolOutputs.push({
-          tool: part.tool,
-          title: part.state.title,
-          output: part.state.output,
-        });
-      } else if (part.state.status === "error" && part.state.error) {
-        toolOutputs.push({
-          tool: part.tool,
-          title: part.state.title,
-          output: `Error: ${part.state.error}`,
-        });
-      }
     }
   }
 
-  return {
-    textOutput: textParts.join("\n\n"),
-    toolOutputs,
-  };
+  return textParts.join("\n\n");
+}
+
+/**
+ * Enhance task description with output instructions.
+ * This ensures the AI provides useful information in its response.
+ */
+function enhanceTask(task: string): string {
+  return `${task}
+
+When you're done, please summarize:
+- What you accomplished
+- Files created, modified, or deleted
+- Any commits made (with commit hashes and which repos)
+- Any issues or warnings`;
 }
 
 /**
@@ -75,20 +65,29 @@ function buildProxyConfig(proxyBaseUrl: string, proxyToken: string): Config {
 }
 
 /**
+ * Result of executeTask including the OpenCode session ID for continuation
+ */
+interface ExecuteTaskResult {
+  result: OpenCodeTaskResult;
+  opencodeSessionId: string;
+}
+
+/**
  * Execute an OpenCode task inside the sandbox.
  *
  * Starts OpenCode server with proxy configuration, creates/gets session,
  * and executes the task. All API calls go through the proxy.
  *
  * @param sandbox - The sandbox instance
- * @param params - Task parameters
+ * @param params - Task parameters (including optional existingOpencodeSessionId)
  * @param workingDirectory - The directory to run OpenCode in (e.g., /workspace/repo)
+ * @returns The task result and OpenCode session ID for continuation
  */
 export async function executeTask(
   sandbox: Sandbox<unknown>,
   params: TaskParams,
   workingDirectory: string,
-): Promise<OpenCodeTaskResult> {
+): Promise<ExecuteTaskResult> {
   // Build proxy-based config
   const config = buildProxyConfig(params.proxyBaseUrl, params.proxyToken);
 
@@ -100,31 +99,37 @@ export async function executeTask(
   });
 
   try {
-    // Get or create OpenCode session
     let opencodeSessionId: string;
 
-    // Try to list existing sessions with proper directory context
-    const existingSessions = (await client.session.list({
-      query: { directory: workingDirectory },
-    })) as OpenCodeSessionListResponse;
-
-    if (existingSessions.data && existingSessions.data.length > 0) {
-      // Use the first existing session
-      opencodeSessionId = existingSessions.data[0].id;
+    // Check if we should continue an existing OpenCode session
+    if (params.existingOpencodeSessionId) {
+      // Use the existing session for continuation
+      opencodeSessionId = params.existingOpencodeSessionId;
     } else {
-      // Create a new session with directory context
-      const created = (await client.session.create({
-        body: { title: `Session: ${params.sessionId}` },
+      // Try to list existing sessions with proper directory context
+      const existingSessions = (await client.session.list({
         query: { directory: workingDirectory },
-      })) as OpenCodeSessionCreateResponse;
+      })) as OpenCodeSessionListResponse;
 
-      if (!created.data?.id) {
-        throw new Error("Failed to create OpenCode session: no ID returned");
+      if (existingSessions.data && existingSessions.data.length > 0) {
+        // Use the first existing session
+        opencodeSessionId = existingSessions.data[0].id;
+      } else {
+        // Create a new session with directory context (no title - let OpenCode auto-generate)
+        const created = (await client.session.create({
+          query: { directory: workingDirectory },
+        })) as OpenCodeSessionCreateResponse;
+
+        if (!created.data?.id) {
+          throw new Error("Failed to create OpenCode session: no ID returned");
+        }
+        opencodeSessionId = created.data.id;
       }
-      opencodeSessionId = created.data.id;
     }
 
-    // Execute the task with proper directory context
+    // Execute the task with enhanced prompt for better output
+    const enhancedTask = enhanceTask(params.task);
+
     const response = (await client.session.prompt({
       path: { id: opencodeSessionId },
       query: { directory: workingDirectory },
@@ -136,51 +141,88 @@ export async function executeTask(
         parts: [
           {
             type: "text",
-            text: params.task,
+            text: enhancedTask,
           },
         ],
       },
     })) as OpenCodePromptResponse;
 
-    // Extract meaningful output from response
-    const { textOutput, toolOutputs } = extractResponseContent(response?.data?.parts ?? []);
+    // Extract text output from response
+    const output = extractTextOutput(response?.data?.parts ?? []);
 
     // Check for errors in the response
     if (response?.data?.info?.error) {
       return {
-        success: false,
-        output: textOutput,
-        toolOutputs,
-        error: response.data.info.error.data.message,
-        filesCreated: [],
-        filesModified: [],
-        commits: [],
-        tokens: response.data.info.tokens,
+        result: {
+          success: false,
+          output,
+          error: response.data.info.error.data.message,
+          tokens: response.data.info.tokens,
+        },
+        opencodeSessionId,
       };
     }
 
     return {
-      success: true,
-      output: textOutput,
-      toolOutputs,
-      filesCreated: [],
-      filesModified: [],
-      commits: [],
-      branch: undefined,
-      tokens: response?.data?.info?.tokens,
+      result: {
+        success: true,
+        output,
+        tokens: response?.data?.info?.tokens,
+      },
+      opencodeSessionId,
     };
   } catch (error) {
+    // Return a failed result but still need to return some session ID
+    // In case of error, we may not have a valid session ID
     return {
-      success: false,
-      output: "",
-      toolOutputs: [],
-      error: error instanceof Error ? error.message : String(error),
-      filesCreated: [],
-      filesModified: [],
-      commits: [],
+      result: {
+        success: false,
+        output: "",
+        error: error instanceof Error ? error.message : String(error),
+      },
+      opencodeSessionId: params.existingOpencodeSessionId ?? "unknown",
     };
   } finally {
     // Always close the server
+    await server.close();
+  }
+}
+
+/**
+ * Get the title of an OpenCode session.
+ * OpenCode auto-generates titles based on the conversation.
+ *
+ * @param sandbox - The sandbox instance
+ * @param opencodeSessionId - The OpenCode session ID
+ * @param proxyBaseUrl - Base URL of the proxy
+ * @param proxyToken - JWT proxy token
+ * @param workingDirectory - The directory to run OpenCode in
+ * @returns The session title or "Untitled" if not available
+ */
+export async function getSessionTitle(
+  sandbox: Sandbox<unknown>,
+  opencodeSessionId: string,
+  proxyBaseUrl: string,
+  proxyToken: string,
+  workingDirectory: string,
+): Promise<string> {
+  const config = buildProxyConfig(proxyBaseUrl, proxyToken);
+
+  const { client, server } = await createOpencode<OpencodeClient>(sandbox, {
+    port: 4096,
+    directory: workingDirectory,
+    config,
+  });
+
+  try {
+    const session = (await client.session.get({
+      path: { id: opencodeSessionId },
+    })) as OpenCodeSessionGetResponse;
+
+    return session.data?.title ?? "Untitled";
+  } catch {
+    return "Untitled";
+  } finally {
     await server.close();
   }
 }

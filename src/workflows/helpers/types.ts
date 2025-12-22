@@ -24,26 +24,25 @@ export interface TaskParams {
    * Base URL of the proxy (e.g., 'https://sandbox-mcp.workers.dev')
    */
   proxyBaseUrl: string;
+  /**
+   * Existing OpenCode session ID for conversation continuation.
+   * If provided, the workflow will continue the existing session.
+   */
+  existingOpencodeSessionId?: string;
 }
 
 /**
- * Result of task execution
+ * Result of task execution - simplified to unstructured output
  */
 export interface TaskResult {
   success: boolean;
-  /** Summary text from the AI's response */
+  /** Summary text from the AI's response (unstructured) */
   output?: string;
-  /** Detailed tool outputs (bash commands, file edits, etc.) */
-  toolOutputs?: Array<{
-    tool: string;
-    title?: string;
-    output?: string;
-  }>;
   error?: string;
-  filesCreated: string[];
-  filesModified: string[];
-  commits: string[];
-  branch?: string;
+  /** Title from OpenCode (auto-generated or provided) */
+  title?: string;
+  /** OpenCode session ID for future continuation */
+  opencodeSessionId?: string;
   /** Token usage from the LLM */
   tokens?: {
     input: number;
@@ -75,15 +74,6 @@ export interface WorkflowDeps {
 }
 
 /**
- * Git status information from workspace
- */
-export interface GitStatus {
-  branch: string;
-  commits: string[];
-  filesModified: string[];
-}
-
-/**
  * OpenCode SDK response types
  */
 export interface OpenCodeSessionListResponse {
@@ -92,6 +82,13 @@ export interface OpenCodeSessionListResponse {
 
 export interface OpenCodeSessionCreateResponse {
   data?: { id: string };
+}
+
+export interface OpenCodeSessionGetResponse {
+  data?: {
+    id: string;
+    title?: string;
+  };
 }
 
 /**
@@ -142,23 +139,13 @@ export interface OpenCodePromptResponse {
 }
 
 /**
- * Result of OpenCode task execution
+ * Result of OpenCode task execution - simplified to unstructured output
  */
 export interface OpenCodeTaskResult {
   success: boolean;
   /** Summary text from the AI's response */
   output: string;
-  /** Detailed tool outputs (bash commands, file edits, etc.) */
-  toolOutputs: Array<{
-    tool: string;
-    title?: string;
-    output?: string;
-  }>;
   error?: string;
-  filesCreated: string[];
-  filesModified: string[];
-  commits: string[];
-  branch?: string;
   /** Token usage from the LLM */
   tokens?: {
     input: number;

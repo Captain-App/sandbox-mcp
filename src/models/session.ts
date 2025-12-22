@@ -1,13 +1,13 @@
 import { Schema } from "effect";
 
 /**
- * Shared validation constants - used by both Effect Schema and Zod schemas
+ * Validation constants for session IDs
  * Session ID: alphanumeric with hyphens, no leading/trailing hyphens
  * Allows: "abc", "a", "abc-123", "my-session-1"
  * Disallows: "-abc", "abc-", "ABC" (uppercase), "ab--cd" (consecutive hyphens)
  */
-export const SESSION_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-export const SESSION_ID_MAX_LENGTH = 64;
+const SESSION_ID_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const SESSION_ID_MAX_LENGTH = 64;
 export const GITHUB_URL_PREFIX = "https://github.com/";
 
 /**
@@ -59,8 +59,12 @@ export const SessionMetadata = Schema.Struct({
   status: SessionStatus,
   workspacePath: Schema.String,
   webUiUrl: Schema.String,
-  repository: Schema.optional(RepositoryInfo),
-  title: Schema.optional(Schema.String),
+  repository: Schema.optionalWith(RepositoryInfo, { exact: true }),
+  title: Schema.optionalWith(Schema.String, { exact: true }),
   config: SessionConfig,
+  // OpenCode session ID for conversation continuation
+  opencodeSessionId: Schema.optionalWith(Schema.String, { exact: true }),
+  // List of repositories that have been cloned into this sandbox
+  clonedRepos: Schema.optionalWith(Schema.Array(Schema.String), { exact: true }),
 });
 export type SessionMetadata = typeof SessionMetadata.Type;

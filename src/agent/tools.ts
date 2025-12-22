@@ -1,7 +1,8 @@
 // src/agent/tools.ts
 import { z } from "zod";
-import { SESSION_ID_PATTERN, SESSION_ID_MAX_LENGTH, GITHUB_URL_PREFIX } from "../models/session";
+
 import { TASK_MAX_LENGTH } from "../models/run";
+import { GITHUB_URL_PREFIX } from "../models/session";
 
 /**
  * MCP tool schemas using Zod (required by MCP SDK)
@@ -14,61 +15,66 @@ import { TASK_MAX_LENGTH } from "../models/run";
  */
 
 /**
- * Schema for opencode_create_session tool input
- */
-export const createSessionInputSchema = z.object({
-  sessionId: z
-    .string()
-    .regex(SESSION_ID_PATTERN, "Session ID must be lowercase alphanumeric with hyphens")
-    .max(SESSION_ID_MAX_LENGTH)
-    .optional()
-    .describe("Unique session identifier. Auto-generated if not provided."),
-
-  repositoryUrl: z
-    .string()
-    .startsWith(GITHUB_URL_PREFIX)
-    .optional()
-    .describe("GitHub repository URL to clone"),
-
-  branch: z.string().optional().describe("Git branch to checkout. Defaults to main."),
-
-  directory: z
-    .string()
-    .optional()
-    .default("/workspace")
-    .describe("Working directory path in the container. Defaults to '/workspace'."),
-
-  title: z.string().optional().describe("Human-readable session title"),
-});
-export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
-
-/**
  * Schema for opencode_run_task tool input
+ * This is the main tool - it creates sessions automatically if needed
  */
 export const runTaskInputSchema = z.object({
-  sessionId: z.string().describe("Session ID from opencode_create_session"),
+  sessionId: z
+    .string()
+    .optional()
+    .describe("Continue existing session. Creates new session if omitted."),
 
-  task: z.string().max(TASK_MAX_LENGTH).describe("Natural language task description"),
+  repository: z
+    .string()
+    .refine((url) => url.startsWith(GITHUB_URL_PREFIX), {
+      message: "Must be a GitHub URL starting with https://github.com/",
+    })
+    .optional()
+    .describe("GitHub repository URL to clone."),
+
+  task: z.string().max(TASK_MAX_LENGTH).describe("Natural language task description."),
+
+  branch: z.string().optional().describe("Git branch to checkout. Defaults to 'main'."),
 
   model: z.string().optional().describe("AI model to use. Defaults to claude-sonnet-4-20250514."),
+
+  title: z
+    .string()
+    .max(100)
+    .optional()
+    .describe("Short label for this task (2-5 words). Auto-generated if omitted."),
 });
 export type RunTaskInput = z.infer<typeof runTaskInputSchema>;
 
 /**
- * Schema for opencode_get_status tool input
+ * Schema for opencode_get_result tool input
+ * Simplified to just runId - no session context needed
  */
-export const getStatusInputSchema = z.object({
-  sessionId: z.string().describe("Session ID to query"),
-
-  runId: z.string().optional().describe("Specific run ID to query"),
-
-  includeGitStatus: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe("Include git branch and commit info"),
+export const getResultInputSchema = z.object({
+  runId: z.string().describe("Run ID from opencode_run_task."),
 });
-export type GetStatusInput = z.infer<typeof getStatusInputSchema>;
+export type GetResultInput = z.infer<typeof getResultInputSchema>;
+
+/**
+ * Schema for opencode_list_runs tool input
+ * Enables discovery of past work with filtering and pagination
+ */
+export const listRunsInputSchema = z.object({
+  sessionId: z.string().optional().describe("Filter by session."),
+
+  status: z
+    .enum(["started", "running", "completed", "failed"])
+    .optional()
+    .describe("Filter by status."),
+
+  limit: z.number().int().min(1).max(100).default(10).describe("Max runs to return. Default 10."),
+
+  before: z
+    .number()
+    .optional()
+    .describe("Unix timestamp cursor for pagination. Returns runs started before this time."),
+});
+export type ListRunsInput = z.infer<typeof listRunsInputSchema>;
 
 /**
  * MCP tool response type - uses index signature for SDK compatibility

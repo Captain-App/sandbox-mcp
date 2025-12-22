@@ -1,44 +1,140 @@
 // src/agent/tools.test.ts
-import { describe, it, expect } from "vitest";
-import { createSessionInputSchema, runTaskInputSchema, formatToolResponse } from "./tools";
+import { describe, expect, it } from "vitest";
+
+import {
+  formatToolResponse,
+  getResultInputSchema,
+  listRunsInputSchema,
+  runTaskInputSchema,
+} from "./tools";
 
 describe("MCP Tool Schemas", () => {
-  it("should validate create session input", () => {
-    const valid = {
-      sessionId: "my-session",
-      repositoryUrl: "https://github.com/user/repo",
-      branch: "main",
-    };
+  describe("runTaskInputSchema", () => {
+    it("should validate run task with repository (new session)", () => {
+      const valid = {
+        repository: "https://github.com/user/repo",
+        task: "Add authentication to the API",
+      };
 
-    const result = createSessionInputSchema.safeParse(valid);
-    expect(result.success).toBe(true);
+      const result = runTaskInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate run task with sessionId (continuation)", () => {
+      const valid = {
+        sessionId: "sess-abc123",
+        task: "Continue working on authentication",
+      };
+
+      const result = runTaskInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate run task with all optional fields", () => {
+      const valid = {
+        sessionId: "sess-abc123",
+        repository: "https://github.com/user/repo",
+        task: "Add JWT auth",
+        branch: "feature/auth",
+        model: "claude-sonnet-4-20250514",
+        title: "JWT auth",
+      };
+
+      const result = runTaskInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should reject invalid repository URL", () => {
+      const invalid = {
+        repository: "https://gitlab.com/user/repo",
+        task: "Some task",
+      };
+
+      const result = runTaskInputSchema.safeParse(invalid);
+      expect(result.success).toBe(false);
+    });
+
+    it("should require task field", () => {
+      const invalid = {
+        sessionId: "sess-abc123",
+      };
+
+      const result = runTaskInputSchema.safeParse(invalid);
+      expect(result.success).toBe(false);
+    });
   });
 
-  it("should reject invalid session ID in create session", () => {
-    const invalid = {
-      sessionId: "INVALID_ID!",
-    };
+  describe("getResultInputSchema", () => {
+    it("should validate get result input", () => {
+      const valid = {
+        runId: "run-abc123",
+      };
 
-    const result = createSessionInputSchema.safeParse(invalid);
-    expect(result.success).toBe(false);
+      const result = getResultInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should require runId", () => {
+      const invalid = {};
+
+      const result = getResultInputSchema.safeParse(invalid);
+      expect(result.success).toBe(false);
+    });
   });
 
-  it("should validate run task input", () => {
-    const valid = {
-      sessionId: "my-session",
-      task: "Add authentication to the API",
-    };
+  describe("listRunsInputSchema", () => {
+    it("should validate list runs with no filters", () => {
+      const valid = {};
 
-    const result = runTaskInputSchema.safeParse(valid);
-    expect(result.success).toBe(true);
+      const result = listRunsInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate list runs with all filters", () => {
+      const valid = {
+        sessionId: "sess-abc123",
+        status: "completed",
+        limit: 20,
+        before: Date.now(),
+      };
+
+      const result = listRunsInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate status enum values", () => {
+      const statuses = ["started", "running", "completed", "failed"];
+
+      for (const status of statuses) {
+        const result = listRunsInputSchema.safeParse({ status });
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it("should reject invalid status", () => {
+      const invalid = {
+        status: "queued", // No longer valid
+      };
+
+      const result = listRunsInputSchema.safeParse(invalid);
+      expect(result.success).toBe(false);
+    });
+
+    it("should enforce limit bounds", () => {
+      expect(listRunsInputSchema.safeParse({ limit: 0 }).success).toBe(false);
+      expect(listRunsInputSchema.safeParse({ limit: 101 }).success).toBe(false);
+      expect(listRunsInputSchema.safeParse({ limit: 50 }).success).toBe(true);
+    });
   });
 
-  it("should format tool response correctly", () => {
-    const data = { sessionId: "test", status: "created" };
-    const response = formatToolResponse(data);
+  describe("formatToolResponse", () => {
+    it("should format tool response correctly", () => {
+      const data = { runId: "test", status: "started" };
+      const response = formatToolResponse(data);
 
-    expect(response.content).toHaveLength(1);
-    expect(response.content[0].type).toBe("text");
-    expect(JSON.parse(response.content[0].text)).toEqual(data);
+      expect(response.content).toHaveLength(1);
+      expect(response.content[0].type).toBe("text");
+      expect(JSON.parse(response.content[0].text)).toEqual(data);
+    });
   });
 });

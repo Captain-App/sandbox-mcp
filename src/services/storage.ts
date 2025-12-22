@@ -10,6 +10,16 @@ import { StorageReadError, StorageWriteError } from "../models/errors";
 export type SqlStorageInterface = SqlStorage;
 
 /**
+ * Options for listing runs across sessions
+ */
+interface ListAllRunsOptions {
+  readonly sessionId?: string;
+  readonly status?: string;
+  readonly limit?: number;
+  readonly before?: number;
+}
+
+/**
  * Storage service interface
  */
 interface StorageServiceInterface {
@@ -28,6 +38,13 @@ interface StorageServiceInterface {
   readonly listRuns: (
     sessionId: string,
     limit?: number,
+  ) => Effect.Effect<ReadonlyArray<RunRecord>, StorageReadError>;
+
+  /**
+   * List runs across all sessions with optional filtering and pagination
+   */
+  readonly listAllRuns: (
+    options?: ListAllRunsOptions,
   ) => Effect.Effect<ReadonlyArray<RunRecord>, StorageReadError>;
 
   readonly initSchema: () => Effect.Effect<void, StorageWriteError>;
@@ -231,6 +248,87 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
       return runs;
     }),
 
+  listAllRuns: (options = {}) =>
+    Effect.gen(function* () {
+      const { sessionId, status, limit = 10, before } = options;
+
+      // Build dynamic query with optional filters
+      // We store started_at in the JSON data field, so we need to extract it
+      // For better performance, we use updated_at as a proxy (they're set at same time for new runs)
+      let query = "SELECT data FROM runs WHERE 1=1";
+      const params: (string | number)[] = [];
+
+      if (sessionId !== undefined) {
+        query += " AND session_id = ?";
+        params.push(sessionId);
+      }
+
+      if (status !== undefined) {
+        // Status is stored in JSON, so we need to filter after fetching
+        // For now, we filter in JS after fetching
+        // TODO: Consider adding status column for better query performance
+      }
+
+      if (before !== undefined) {
+        // Filter by updated_at as proxy for started_at
+        query += " AND updated_at < ?";
+        params.push(before);
+      }
+
+      query += " ORDER BY updated_at DESC LIMIT ?";
+      // Fetch extra if filtering by status (we'll filter in JS)
+      params.push(status !== undefined ? limit * 3 : limit);
+
+      // Query the database
+      const result = yield* Effect.try({
+        try: () => sql.exec<{ data: string }>(query, ...params).toArray(),
+        catch: (error) =>
+          new StorageReadError({
+            key: "runs:all",
+            cause: String(error),
+          }),
+      });
+
+      // Parse and validate each row
+      const runs: RunRecord[] = [];
+      for (const row of result) {
+        // Parse JSON
+        const jsonData = yield* Effect.try({
+          try: () => JSON.parse(row.data) as unknown,
+          catch: (error) =>
+            new StorageReadError({
+              key: "runs:all",
+              cause: `Invalid JSON in run record: ${error}`,
+            }),
+        });
+
+        // Use Schema.decodeUnknown for proper error handling
+        const parsed = yield* Schema.decodeUnknown(RunRecord)(jsonData).pipe(
+          Effect.mapError(
+            (parseError) =>
+              new StorageReadError({
+                key: "runs:all",
+                cause: `Schema validation failed: ${formatParseError(parseError)}`,
+              }),
+          ),
+        );
+
+        // Apply status filter if specified
+        if (status !== undefined && parsed.status !== status) {
+          continue;
+        }
+
+        runs.push(parsed);
+
+        // Stop once we have enough results
+        if (runs.length >= limit) {
+          break;
+        }
+      }
+
+      return runs;
+    }),
+
   initSchema: () =>
     Effect.try({
       try: () => {
@@ -252,6 +350,11 @@ export const makeStorageService = (sql: SqlStorageInterface): StorageServiceInte
         sql.exec(`
 					CREATE INDEX IF NOT EXISTS idx_runs_session 
 					ON runs(session_id, updated_at DESC)
+				`);
+        // Index for listAllRuns pagination
+        sql.exec(`
+					CREATE INDEX IF NOT EXISTS idx_runs_updated 
+					ON runs(updated_at DESC)
 				`);
       },
       catch: (error) =>

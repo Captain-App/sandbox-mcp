@@ -22,7 +22,18 @@ export class SessionNotFoundError extends Schema.TaggedError<SessionNotFoundErro
   }
 }
 
-type SessionError = SessionNotFoundError;
+export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>()("RunNotFoundError", {
+  runId: Schema.String,
+}) {
+  /** @public Used by isSessionError type guard */
+  readonly [SessionErrorTypeId]: SessionErrorTypeId = SessionErrorTypeId;
+
+  override get message(): string {
+    return `Run "${this.runId}" not found`;
+  }
+}
+
+type SessionError = SessionNotFoundError | RunNotFoundError;
 
 export const isSessionError = (u: unknown): u is SessionError =>
   Predicate.hasProperty(u, SessionErrorTypeId);
