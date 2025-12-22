@@ -1,8 +1,100 @@
 // src/workflows/helpers/sandbox.ts
 import { getSandbox as cfGetSandbox, type Sandbox } from "@cloudflare/sandbox";
 
-import { configureAnthropic, configureGithub, configureR2, toContainerUrl } from "../../proxy";
+import { configureAnthropic, configureGithub, toContainerUrl } from "../../proxy";
+import { restoreSession } from "./backup";
 import type { WorkflowDeps } from "./types";
+
+/**
+ * Parameters for ensuring sandbox is ready for use.
+ */
+interface SandboxReadyParams {
+  sandbox: Sandbox<unknown>;
+  sessionId: string;
+  bucket: R2Bucket;
+  proxyBaseUrl: string;
+  proxyToken: string;
+  repository?: {
+    url: string;
+    branch?: string;
+  };
+}
+
+/**
+ * Result of ensuring sandbox is ready.
+ */
+interface SandboxReadyResult {
+  /** Working directory path ("/workspace" or "/workspace/{repo}") */
+  workspacePath: string;
+  /** Whether OpenCode state was restored from backup */
+  restoredBackup: boolean;
+  /** Whether repository was cloned */
+  clonedRepo: boolean;
+  /** Whether proxy was configured */
+  configuredProxy: boolean;
+}
+
+/**
+ * Ensure sandbox is ready for use - idempotent initialization.
+ *
+ * This is the main entry point for sandbox initialization. It checks the
+ * current state and only performs actions that are needed:
+ *
+ * 1. Restores OpenCode backup if storage directory is missing
+ * 2. Clones repository if .git directory is missing
+ * 3. Configures proxy if environment is not set up
+ *
+ * Safe to call multiple times - each step checks before acting.
+ * Used by both workflow (execute-task.ts) and web UI (index.ts).
+ */
+export async function ensureSandboxReady(params: SandboxReadyParams): Promise<SandboxReadyResult> {
+  const { sandbox, sessionId, bucket, proxyBaseUrl, proxyToken, repository } = params;
+
+  const result: SandboxReadyResult = {
+    workspacePath: "/workspace",
+    restoredBackup: false,
+    clonedRepo: false,
+    configuredProxy: false,
+  };
+
+  // 1. Check & restore OpenCode backup
+  const storageCheck = await sandbox.exec(
+    "test -d ~/.local/share/opencode/storage && echo exists || echo missing",
+  );
+  if (storageCheck.stdout.trim() === "missing") {
+    const restored = await restoreSession(sandbox, sessionId, bucket);
+    result.restoredBackup = restored;
+  }
+
+  // 2. Check & clone repository
+  if (repository) {
+    const repoName = getRepoName(repository.url);
+    const targetDir = `/workspace/${repoName}`;
+
+    const repoCheck = await sandbox.exec(
+      `test -d ${targetDir}/.git && echo exists || echo missing`,
+    );
+    if (repoCheck.stdout.trim() === "missing") {
+      await cloneRepository(sandbox, repository.url, repository.branch);
+      result.clonedRepo = true;
+    }
+
+    result.workspacePath = targetDir;
+  }
+
+  // 3. Check & configure proxy
+  // Check if ANTHROPIC_BASE_URL is set in the environment
+  const proxyCheck = await sandbox.exec(
+    "grep -q ANTHROPIC_BASE_URL /workspace/.env 2>/dev/null && echo exists || echo missing",
+  );
+  if (proxyCheck.stdout.trim() === "missing") {
+    await configureSandboxProxy(sandbox, proxyBaseUrl, proxyToken);
+    await setupGitConfig(sandbox);
+    result.configuredProxy = true;
+  }
+
+  return result;
+}
 
 /**
  * Get a sandbox instance from the binding.
@@ -24,7 +116,7 @@ export function getSandbox(deps: WorkflowDeps, sandboxId: string): Sandbox<unkno
  * After calling this, the sandbox can make authenticated API calls
  * without having access to real credentials.
  */
-export async function configureSandboxProxy(
+async function configureSandboxProxy(
   sandbox: Sandbox<unknown>,
   proxyBaseUrl: string,
   proxyToken: string,
@@ -35,29 +127,10 @@ export async function configureSandboxProxy(
 }
 
 /**
- * Mount R2 storage via proxy (credentials never enter sandbox).
- *
- * Uses s3fs with the proxy as the S3 endpoint. The JWT token is used
- * as the access key ID, which the proxy extracts and validates.
- */
-export async function mountR2Storage(
-  sandbox: Sandbox<unknown>,
-  sessionId: string,
-  proxyBaseUrl: string,
-  proxyToken: string,
-): Promise<void> {
-  const bucket = "opencode-sessions";
-  const mountPath = "/workspace/storage";
-  const containerProxyUrl = toContainerUrl(proxyBaseUrl);
-
-  await configureR2(sandbox, containerProxyUrl, proxyToken, `${bucket}/${sessionId}`, mountPath);
-}
-
-/**
  * Set up basic git configuration (user info for commits).
  * Authentication is handled by the proxy via configureGithub().
  */
-export async function setupGitConfig(sandbox: Sandbox<unknown>): Promise<void> {
+async function setupGitConfig(sandbox: Sandbox<unknown>): Promise<void> {
   await sandbox.exec(`git config --global user.email "opencode@sandbox.workers.dev"`);
   await sandbox.exec(`git config --global user.name "OpenCode Bot"`);
 }
@@ -75,7 +148,7 @@ function getRepoName(url: string): string {
 /**
  * Clone a git repository into /workspace/{repo-name}
  */
-export async function cloneRepository(
+async function cloneRepository(
   sandbox: Sandbox<unknown>,
   url: string,
   branch?: string,

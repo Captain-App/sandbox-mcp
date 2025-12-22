@@ -24,7 +24,6 @@
 		"@modelcontextprotocol/sdk": "^1.25.1",
 		"@opencode-ai/sdk": "^1.0.184",
 		"agents": "^0.2.34",
-		"aws4fetch": "^1.0.20",
 		"effect": "^3.19.13",
 		"jose": "^6.1.3",
 		"zod": "^4.2.1"

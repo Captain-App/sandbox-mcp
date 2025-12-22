@@ -5,17 +5,9 @@ import type { Config } from "@opencode-ai/sdk";
 import { Effect } from "effect";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
-import {
-  anthropic,
-  configureAnthropic,
-  configureGithub,
-  createProxyHandler,
-  createProxyToken,
-  github,
-  r2,
-  toContainerUrl,
-} from "./proxy";
+import { anthropic, createProxyHandler, createProxyToken, github, toContainerUrl } from "./proxy";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
+import { ensureSandboxReady } from "./workflows/helpers/sandbox";
 
 // Export Sandbox class from @cloudflare/sandbox (required for containers)
 export { Sandbox } from "@cloudflare/sandbox";
@@ -30,12 +22,11 @@ export { ExecuteTaskWorkflow };
  * Routes:
  * - /proxy/anthropic/* → Anthropic API (injects ANTHROPIC_API_KEY)
  * - /proxy/github/* → GitHub (injects GITHUB_TOKEN for git operations)
- * - /proxy/r2/* → R2 bucket (re-signs with R2 credentials)
  */
 const proxyHandler = createProxyHandler<Env>({
   mountPath: "/proxy",
   jwtSecret: (env) => env.PROXY_JWT_SECRET,
-  services: { anthropic, github, r2 },
+  services: { anthropic, github },
 });
 
 /**
@@ -83,7 +74,47 @@ function getSessionFromCookie(request: Request): string | null {
 }
 
 /**
- * Proxy request to the appropriate sandbox
+ * Session metadata stored in R2
+ */
+interface SessionMetadata {
+  opencodeSessionId?: string;
+  workspacePath?: string;
+  repository?: {
+    url: string;
+    branch?: string;
+  };
+}
+
+/**
+ * Get session metadata from R2
+ */
+async function getSessionMetadata(
+  bucket: R2Bucket,
+  sessionId: string,
+): Promise<SessionMetadata | null> {
+  const metadataKey = `sessions/${sessionId}.json`;
+  const metadataObject = await bucket.get(metadataKey);
+
+  if (!metadataObject) {
+    return null;
+  }
+
+  try {
+    return await metadataObject.json<SessionMetadata>();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Proxy request to the appropriate sandbox.
+ *
+ * This function ensures the sandbox is ready before proxying:
+ * - Restores OpenCode backup if needed
+ * - Clones repository if needed
+ * - Configures proxy credentials if needed
+ *
+ * All initialization is idempotent - safe to call on every request.
  */
 async function proxyToSandbox(
   request: Request,
@@ -105,14 +136,22 @@ async function proxyToSandbox(
     }),
   );
 
-  // Configure sandbox to use proxy for external services
-  const containerProxyUrl = toContainerUrl(env.PROXY_BASE_URL);
-  await configureAnthropic(sandbox, containerProxyUrl, proxyToken);
-  await configureGithub(sandbox, containerProxyUrl, proxyToken);
+  // Get session metadata to know repository info
+  const metadata = await getSessionMetadata(env.SESSIONS_BUCKET, sessionId);
 
-  // Start OpenCode server with proxy-based config
+  // Ensure sandbox is ready (idempotent - checks state before acting)
+  const ready = await ensureSandboxReady({
+    sandbox,
+    sessionId,
+    bucket: env.SESSIONS_BUCKET,
+    proxyBaseUrl: env.PROXY_BASE_URL,
+    proxyToken,
+    repository: metadata?.repository,
+  });
+
+  // Start OpenCode server with proxy-based config and correct workspace path
   const server = await createOpencodeServer(sandbox, {
-    directory: "/workspace",
+    directory: ready.workspacePath,
     config: getProxyOpencodeConfig(env.PROXY_BASE_URL, proxyToken),
   });
 
@@ -156,7 +195,7 @@ export default {
 
     // Web UI entry point - /session/{sessionId} sets cookie and redirects to OpenCode
     // OpenCode expects URLs like /{base64(directory)}/session/{opencode-session-id}
-    // We query the DO to get the actual OpenCode session ID and workspace path
+    // We query R2 to get the actual OpenCode session ID and workspace path
     //
     // IMPORTANT: Don't match OpenCode's own API routes like /session/status, /session/list
     // Our session IDs are 8 hex chars (e.g., "a1b2c3d4"), so we use that pattern
@@ -165,36 +204,9 @@ export default {
       const sessionId = sessionMatch[1];
 
       // Look up session info from R2
-      // Session metadata is stored as JSON in R2 at sessions/{sessionId}.json
-      // This is written by the MCP agent when sessions are created/updated
-      const metadataKey = `sessions/${sessionId}.json`;
-      const metadataObject = await env.SESSIONS_BUCKET.get(metadataKey);
+      const metadata = await getSessionMetadata(env.SESSIONS_BUCKET, sessionId);
 
-      let sessionInfo: {
-        found: boolean;
-        opencodeSessionId?: string;
-        workspacePath?: string;
-      };
-
-      if (metadataObject) {
-        try {
-          const metadata = await metadataObject.json<{
-            opencodeSessionId?: string;
-            workspacePath?: string;
-          }>();
-          sessionInfo = {
-            found: true,
-            opencodeSessionId: metadata.opencodeSessionId,
-            workspacePath: metadata.workspacePath,
-          };
-        } catch {
-          sessionInfo = { found: false };
-        }
-      } else {
-        sessionInfo = { found: false };
-      }
-
-      if (!sessionInfo.found) {
+      if (!metadata) {
         return new Response(JSON.stringify({ error: "Session not found", sessionId }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -202,13 +214,13 @@ export default {
       }
 
       // Use the stored workspace path, or default to /workspace
-      const workspacePath = sessionInfo.workspacePath || "/workspace";
+      const workspacePath = metadata.workspacePath || "/workspace";
       const workspaceBase64 = btoa(workspacePath);
 
       // Build redirect URL - include OpenCode session ID if available
       let redirectPath = `/${workspaceBase64}/session`;
-      if (sessionInfo.opencodeSessionId) {
-        redirectPath += `/${sessionInfo.opencodeSessionId}`;
+      if (metadata.opencodeSessionId) {
+        redirectPath += `/${metadata.opencodeSessionId}`;
       }
 
       const redirectUrl = new URL(redirectPath, url.origin);
