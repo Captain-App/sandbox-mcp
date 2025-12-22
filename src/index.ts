@@ -128,12 +128,16 @@ async function proxyToSandbox(
   // Get session metadata to know repository info
   const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
 
+  // Derive base URL from request (no need for env var)
+  const requestUrl = new URL(request.url);
+  const baseUrl = `${requestUrl.protocol}//${requestUrl.host}`;
+
   // Ensure sandbox is ready (idempotent - checks state before acting)
   const ready = await ensureSandboxReady({
     sandbox,
     sessionId,
     bucket: env.SESSIONS_BUCKET,
-    proxyBaseUrl: env.PROXY_BASE_URL,
+    proxyBaseUrl: baseUrl,
     proxyToken,
     repository: metadata?.repository,
   });
@@ -141,7 +145,7 @@ async function proxyToSandbox(
   // Start OpenCode server with proxy-based config and correct workspace path
   const server = await createOpencodeServer(sandbox, {
     directory: ready.workspacePath,
-    config: getProxyOpencodeConfig(env.PROXY_BASE_URL, proxyToken),
+    config: getProxyOpencodeConfig(baseUrl, proxyToken),
   });
 
   // Rewrite URL to the target path - OpenCode expects requests at root

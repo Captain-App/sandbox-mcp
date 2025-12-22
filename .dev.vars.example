@@ -1,4 +1,3 @@
 PROXY_JWT_SECRET=dev-secret
-PROXY_BASE_URL=http://localhost:8787
 ANTHROPIC_API_KEY=sk-ant-xxx
 GITHUB_TOKEN=ghp_xxx

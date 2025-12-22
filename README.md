@@ -31,7 +31,7 @@ This MCP server solves that with **fire-and-forget task delegation**:
 1. Clone and install:
 
 ```bash
-git clone https://github.com/sst/sandbox-mcp.git
+git clone https://github.com/ghostwriternr/sandbox-mcp.git
 cd sandbox-mcp
 npm install
 ```
@@ -40,7 +40,6 @@ npm install
 
 ```bash
 wrangler secret put PROXY_JWT_SECRET    # Any random string for signing tokens
-wrangler secret put PROXY_BASE_URL      # Your worker URL (e.g., https://sandbox-mcp.you.workers.dev)
 wrangler secret put ANTHROPIC_API_KEY   # sk-ant-xxx
 wrangler secret put GITHUB_TOKEN        # ghp_xxx
 ```

@@ -1,4 +1,5 @@
 // src/agent/mcp-agent.ts
+import type { Connection, ConnectionContext } from "agents";
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Schema } from "effect";
@@ -163,12 +164,38 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     );
   }
 
+  /** Cached base URL, set during onConnect */
+  private baseUrl: string | null = null;
+
+  /**
+   * Called when a client connects. We capture the base URL from the request
+   * so we can use it later in tool handlers (which don't have request context).
+   */
+  override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
+    // Extract and cache the base URL from the connection request
+    const url = new URL(ctx.request.url);
+    this.baseUrl = `${url.protocol}//${url.host}`;
+
+    // Call parent implementation
+    return super.onConnect(connection, ctx);
+  }
+
+  /**
+   * Get the base URL for this worker.
+   * Uses the URL captured during onConnect.
+   */
+  private getBaseUrl(): string {
+    if (!this.baseUrl) {
+      throw new Error("Base URL not available - onConnect must be called first");
+    }
+    return this.baseUrl;
+  }
+
   /**
    * Build the absolute web UI URL for a session.
-   * Uses PROXY_BASE_URL as the base since the same worker serves both MCP and web UI.
    */
   private getWebUiUrl(sessionId: string): string {
-    return `${this.env.PROXY_BASE_URL}/session/${sessionId}/`;
+    return `${this.getBaseUrl()}/session/${sessionId}/`;
   }
 
   /**
@@ -306,7 +333,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               branch: params.branch ?? session.repository?.branch,
               existingOpencodeSessionId: session.opencodeSessionId,
               proxyToken,
-              proxyBaseUrl: this.env.PROXY_BASE_URL,
+              proxyBaseUrl: this.getBaseUrl(),
             },
           });
 
