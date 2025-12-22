@@ -1,6 +1,6 @@
 // src/index.ts
 import { getSandbox } from "@cloudflare/sandbox";
-import { createOpencodeServer, proxyToOpencode } from "@cloudflare/sandbox/opencode";
+import { createOpencodeServer } from "@cloudflare/sandbox/opencode";
 import type { Config } from "@opencode-ai/sdk";
 import { Effect } from "effect";
 
@@ -84,6 +84,22 @@ export default {
     const sessionMatch = url.pathname.match(/^\/session\/([^/]+)(\/.*)?$/);
     if (sessionMatch) {
       const sessionId = sessionMatch[1];
+      const subPath = sessionMatch[2] || "/";
+
+      // Handle the ?url= redirect for OpenCode frontend
+      // OpenCode's frontend defaults to localhost:4096 - we need to tell it our proxy URL
+      // We handle this ourselves because proxyToOpencode's redirect doesn't know about our /session/{id} prefix
+      if (!url.searchParams.has("url") && request.method === "GET") {
+        const accept = request.headers.get("accept") || "";
+        const isHtmlRequest = accept.includes("text/html") || subPath === "/";
+        if (isHtmlRequest) {
+          // Redirect to same URL but with ?url= pointing to our session prefix
+          // This tells OpenCode frontend to use /session/{id}/ as the API base
+          const sessionBaseUrl = `${url.origin}/session/${sessionId}`;
+          url.searchParams.set("url", sessionBaseUrl);
+          return Response.redirect(url.toString(), 302);
+        }
+      }
 
       try {
         // Get sandbox for this session (will wake it up if sleeping)
@@ -111,8 +127,21 @@ export default {
           config: getProxyOpencodeConfig(env.PROXY_BASE_URL, proxyToken),
         });
 
-        // Proxy the request to OpenCode's web UI
-        return proxyToOpencode(request, sandbox, server);
+        // Rewrite URL to strip /session/{id} prefix - OpenCode expects requests at root
+        // Keep query params (including ?url= for frontend configuration)
+        const rewrittenUrl = new URL(subPath, url.origin);
+        rewrittenUrl.search = url.search;
+
+        // Create new request with rewritten URL but preserve method/headers/body
+        const rewrittenRequest = new Request(rewrittenUrl.toString(), {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          redirect: request.redirect,
+        });
+
+        // Proxy directly to container (skip proxyToOpencode's redirect logic since we handle it above)
+        return sandbox.containerFetch(rewrittenRequest, server.port);
       } catch (error) {
         console.error("Web UI proxy error:", error);
         return new Response(
