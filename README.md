@@ -132,15 +132,6 @@ npm run check        # Full CI check (typecheck + lint + test)
 npm run deploy       # Deploy to Cloudflare
 ```
 
-### Testing
-
-```bash
-npm run test             # Run all tests
-npm run test -- --watch  # Watch mode
-```
-
-Tests use Vitest with mock layers for Effect services.
-
 ## Deployment
 
 1. Set up secrets:
@@ -157,17 +148,6 @@ wrangler secret put PROXY_BASE_URL
 ```bash
 npm run deploy
 ```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `PROXY_JWT_SECRET` | Secret for signing proxy JWT tokens |
-| `PROXY_BASE_URL` | Public URL of this worker |
-| `ANTHROPIC_API_KEY` | Anthropic API key for OpenCode |
-| `GITHUB_TOKEN` | GitHub PAT for git operations |
 
 ## Contributing
 

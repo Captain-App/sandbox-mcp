@@ -269,17 +269,6 @@ npm run check  # Runs: typecheck, format:check, lint, knip, test
 
 Pre-commit hooks run lint and format checks automatically.
 
-## Key Files to Understand
-
-| File | What It Does |
-|------|--------------|
-| `src/index.ts` | All HTTP routing logic |
-| `src/agent/mcp-agent.ts` | MCP tool implementations |
-| `src/workflows/execute-task.ts` | Task execution flow |
-| `src/proxy/handler.ts` | Zero-trust proxy routing |
-| `src/services/session.ts` | R2 session storage with index |
-| `src/services/run.ts` | R2 run storage with global index |
-
 ## Gotchas
 
 1. **MCP creates separate DO per connection**: That's why sessions are in R2, not DO storage
