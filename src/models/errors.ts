@@ -94,7 +94,6 @@ export const isSessionStorageError = (u: unknown): u is SessionStorageError =>
 export class RunStorageReadError extends Schema.TaggedError<RunStorageReadError>()(
   "RunStorageReadError",
   {
-    sessionId: Schema.String,
     runId: Schema.optionalWith(Schema.String, { exact: true }),
     cause: Schema.String,
   },
@@ -104,9 +103,9 @@ export class RunStorageReadError extends Schema.TaggedError<RunStorageReadError>
 
   override get message(): string {
     if (this.runId) {
-      return `Failed to read run "${this.runId}" in session "${this.sessionId}": ${this.cause}`;
+      return `Failed to read run "${this.runId}": ${this.cause}`;
     }
-    return `Failed to read runs for session "${this.sessionId}": ${this.cause}`;
+    return `Failed to read runs: ${this.cause}`;
   }
 }
 
@@ -116,7 +115,6 @@ export class RunStorageReadError extends Schema.TaggedError<RunStorageReadError>
 export class RunStorageWriteError extends Schema.TaggedError<RunStorageWriteError>()(
   "RunStorageWriteError",
   {
-    sessionId: Schema.String,
     runId: Schema.optionalWith(Schema.String, { exact: true }),
     cause: Schema.String,
   },
@@ -126,9 +124,9 @@ export class RunStorageWriteError extends Schema.TaggedError<RunStorageWriteErro
 
   override get message(): string {
     if (this.runId) {
-      return `Failed to write run "${this.runId}" in session "${this.sessionId}": ${this.cause}`;
+      return `Failed to write run "${this.runId}": ${this.cause}`;
     }
-    return `Failed to write runs for session "${this.sessionId}": ${this.cause}`;
+    return `Failed to write runs: ${this.cause}`;
   }
 }
 

@@ -90,10 +90,19 @@ export const myToolInputSchema = {
 
 ## Architecture Decisions
 
-### Storage Split
+### Storage Layout
+
+All data is stored in R2 for cross-DO access. Key patterns are defined in `src/storage/keys.ts`:
+
+```
+sessions/_index.json           # Global session index
+sessions/{sessionId}.json      # Session metadata (flat)
+runs/_index.json               # Global runs index
+runs/{runId}.json              # Run data (flat)
+```
 
 - **Sessions in R2**: Cross-DO access (MCP lib creates separate DO per connection)
-- **Runs in R2**: Cross-DO access, per-session index pattern (see `src/services/run.ts`)
+- **Runs in R2**: Global index enables cross-session queries without knowing sessionIds
 
 ### Zero-Trust Proxy
 
@@ -200,7 +209,7 @@ Pre-commit hooks run lint and format checks automatically.
 | `src/workflows/execute-task.ts` | Task execution flow |
 | `src/proxy/handler.ts` | Zero-trust proxy routing |
 | `src/services/session.ts` | R2 session storage with index |
-| `src/services/run.ts` | R2 run storage with per-session index |
+| `src/services/run.ts` | R2 run storage with global index |
 
 ## Gotchas
 

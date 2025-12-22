@@ -65,9 +65,8 @@ describe("MCP Tool Schemas", () => {
   });
 
   describe("getResultInputSchema", () => {
-    it("should validate get result input with sessionId and runId", () => {
+    it("should validate get result input with runId only", () => {
       const valid = {
-        sessionId: "sess-abc123",
         runId: "run-abc123",
       };
 
@@ -75,19 +74,8 @@ describe("MCP Tool Schemas", () => {
       expect(result.success).toBe(true);
     });
 
-    it("should require sessionId", () => {
-      const invalid = {
-        runId: "run-abc123",
-      };
-
-      const result = getResultInputSchema.safeParse(invalid);
-      expect(result.success).toBe(false);
-    });
-
     it("should require runId", () => {
-      const invalid = {
-        sessionId: "sess-abc123",
-      };
+      const invalid = {};
 
       const result = getResultInputSchema.safeParse(invalid);
       expect(result.success).toBe(false);
@@ -95,7 +83,14 @@ describe("MCP Tool Schemas", () => {
   });
 
   describe("listRunsInputSchema", () => {
-    it("should validate list runs with sessionId", () => {
+    it("should validate list runs with no filters (list all)", () => {
+      const valid = {};
+
+      const result = listRunsInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate list runs with optional sessionId filter", () => {
       const valid = {
         sessionId: "sess-abc123",
       };
@@ -104,27 +99,40 @@ describe("MCP Tool Schemas", () => {
       expect(result.success).toBe(true);
     });
 
-    it("should validate list runs with optional limit", () => {
+    it("should validate list runs with optional status filter", () => {
+      const valid = {
+        status: "completed",
+      };
+
+      const result = listRunsInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
+    });
+
+    it("should validate list runs with all filters", () => {
       const valid = {
         sessionId: "sess-abc123",
+        status: "failed",
         limit: 20,
+        before: 1703260800000,
       };
 
       const result = listRunsInputSchema.safeParse(valid);
       expect(result.success).toBe(true);
     });
 
-    it("should require sessionId", () => {
-      const invalid = {};
+    it("should reject invalid status values", () => {
+      const invalid = {
+        status: "invalid-status",
+      };
 
       const result = listRunsInputSchema.safeParse(invalid);
       expect(result.success).toBe(false);
     });
 
     it("should enforce limit bounds", () => {
-      expect(listRunsInputSchema.safeParse({ sessionId: "test", limit: 0 }).success).toBe(false);
-      expect(listRunsInputSchema.safeParse({ sessionId: "test", limit: 101 }).success).toBe(false);
-      expect(listRunsInputSchema.safeParse({ sessionId: "test", limit: 50 }).success).toBe(true);
+      expect(listRunsInputSchema.safeParse({ limit: 0 }).success).toBe(false);
+      expect(listRunsInputSchema.safeParse({ limit: 101 }).success).toBe(false);
+      expect(listRunsInputSchema.safeParse({ limit: 50 }).success).toBe(true);
     });
   });
 

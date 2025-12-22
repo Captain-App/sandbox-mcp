@@ -3,20 +3,21 @@ import { Context, Effect, Layer, Option, ParseResult, Schedule, Schema } from "e
 
 import { SessionStorageReadError, SessionStorageWriteError } from "../models/errors";
 import { SessionMetadata } from "../models/session";
+import { StorageKeys } from "../storage/keys";
 
 /**
  * Session service that uses R2 as the storage backend.
  *
- * Storage layout:
- * - sessions/_index.json           <- Index of all sessions (for efficient listing)
- * - sessions/{sessionId}/metadata.json <- Full session data
+ * Storage layout (see src/storage/keys.ts):
+ * - sessions/_index.json      <- Index of all sessions (for efficient listing)
+ * - sessions/{sessionId}.json <- Full session data
  *
  * This provides a single source of truth for session metadata that can be
  * accessed from any worker or DO instance, solving the cross-DO access problem
  * inherent in the MCP library's per-connection DO model.
  *
  * Note: Run records are stored separately in R2 via RunStorage
- * (see src/services/run.ts) using a per-session index pattern.
+ * (see src/services/run.ts) using a global runs index.
  */
 
 // =============================================================================
@@ -49,11 +50,8 @@ type SessionIndex = typeof SessionIndex.Type;
 // Constants
 // =============================================================================
 
-const INDEX_KEY = "sessions/_index.json";
-
-function getSessionKey(sessionId: string): string {
-  return `sessions/${sessionId}/metadata.json`;
-}
+// Use StorageKeys for single source of truth
+const INDEX_KEY = StorageKeys.sessionIndex();
 
 // =============================================================================
 // Service Interface
@@ -245,7 +243,7 @@ function makeSessionStorageService(bucket: R2Bucket): SessionStorageService {
   return {
     getSession: (sessionId) =>
       Effect.gen(function* () {
-        const key = getSessionKey(sessionId);
+        const key = StorageKeys.session(sessionId);
 
         const object = yield* Effect.tryPromise({
           try: () => bucket.get(key),
@@ -296,7 +294,7 @@ function makeSessionStorageService(bucket: R2Bucket): SessionStorageService {
         );
 
         // Write the full session metadata
-        const key = getSessionKey(session.sessionId);
+        const key = StorageKeys.session(session.sessionId);
         yield* Effect.tryPromise({
           try: () =>
             bucket.put(key, JSON.stringify(session), {
@@ -334,7 +332,7 @@ function makeSessionStorageService(bucket: R2Bucket): SessionStorageService {
     deleteSession: (sessionId) =>
       Effect.gen(function* () {
         // Delete the session metadata
-        const key = getSessionKey(sessionId);
+        const key = StorageKeys.session(sessionId);
         yield* Effect.tryPromise({
           try: () => bucket.delete(key),
           catch: (error) =>

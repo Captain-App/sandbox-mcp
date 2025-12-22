@@ -3,71 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { SessionStorageReadError } from "../models/errors";
 import type { SessionId, SessionMetadata } from "../models/session";
+import { createMockR2Bucket } from "../test-utils/r2-mock";
 import { makeSessionStorageLayer, SessionStorage } from "./session";
-
-/**
- * Creates a mock R2 bucket for testing
- */
-const createMockBucket = (options?: { failGet?: boolean; failPut?: boolean }) => {
-  const store = new Map<string, string>();
-  let etagCounter = 0;
-  const etags = new Map<string, string>();
-
-  return {
-    get: async (key: string) => {
-      if (options?.failGet) {
-        throw new Error("Simulated R2 get failure");
-      }
-      const data = store.get(key);
-      if (!data) return null;
-      return {
-        json: async <T>() => JSON.parse(data) as T,
-        text: async () => data,
-        etag: etags.get(key) ?? "default-etag",
-      };
-    },
-    put: async (key: string, value: string, putOptions?: R2PutOptions) => {
-      if (options?.failPut) {
-        throw new Error("Simulated R2 put failure");
-      }
-
-      // Handle conditional writes (optimistic locking)
-      // R2Conditional has etagMatches property, but TypeScript union with Headers
-      // requires type narrowing
-      const onlyIf = putOptions?.onlyIf as { etagMatches?: string } | undefined;
-      if (onlyIf?.etagMatches) {
-        const currentEtag = etags.get(key);
-        if (currentEtag && currentEtag !== onlyIf.etagMatches) {
-          return null; // Conditional write failed
-        }
-      }
-
-      store.set(key, value);
-      const newEtag = `etag-${++etagCounter}`;
-      etags.set(key, newEtag);
-      return { etag: newEtag };
-    },
-    delete: async (key: string) => {
-      store.delete(key);
-      etags.delete(key);
-    },
-    list: async (listOptions: { prefix: string; limit?: number; cursor?: string }) => {
-      const objects: { key: string }[] = [];
-      for (const key of store.keys()) {
-        if (key.startsWith(listOptions.prefix)) {
-          objects.push({ key });
-        }
-      }
-      return {
-        objects: objects.slice(0, listOptions.limit ?? 100),
-        truncated: objects.length > (listOptions.limit ?? 100),
-        cursor: undefined,
-      };
-    },
-    // Expose store for test inspection
-    _store: store,
-  } as unknown as R2Bucket & { _store: Map<string, string> };
-};
 
 /**
  * Helper to run an effect with the SessionStorage layer
@@ -94,7 +31,7 @@ function runWithStorageExit<A, E>(
 describe("SessionService (R2)", () => {
   describe("getSession", () => {
     it("should store and retrieve session metadata", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const session: SessionMetadata = {
         sessionId: "test-session-123" as SessionId,
@@ -124,7 +61,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return None for non-existent session", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const program = Effect.gen(function* () {
         const storage = yield* SessionStorage;
@@ -137,7 +74,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return SessionStorageReadError on R2 failure", async () => {
-      const bucket = createMockBucket({ failGet: true });
+      const bucket = createMockR2Bucket({ failGet: true });
 
       const program = Effect.gen(function* () {
         const storage = yield* SessionStorage;
@@ -160,9 +97,9 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return SessionStorageReadError for invalid JSON", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
       // Manually insert invalid JSON
-      bucket._store.set("sessions/bad-json/metadata.json", "not-valid-json{");
+      bucket._store.set("sessions/bad-json.json", "not-valid-json{");
 
       const program = Effect.gen(function* () {
         const storage = yield* SessionStorage;
@@ -183,10 +120,10 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return SessionStorageReadError for schema validation failure", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
       // Insert valid JSON but invalid session schema (missing required fields)
       bucket._store.set(
-        "sessions/invalid-schema/metadata.json",
+        "sessions/invalid-schema.json",
         JSON.stringify({ sessionId: "invalid-schema", wrongField: true }),
       );
 
@@ -213,7 +150,7 @@ describe("SessionService (R2)", () => {
 
   describe("putSession", () => {
     it("should store session at correct R2 key path", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const session: SessionMetadata = {
         sessionId: "key-path-test" as SessionId,
@@ -233,11 +170,11 @@ describe("SessionService (R2)", () => {
 
       await runWithStorage(bucket, program);
 
-      expect(bucket._store.has("sessions/key-path-test/metadata.json")).toBe(true);
+      expect(bucket._store.has("sessions/key-path-test.json")).toBe(true);
     });
 
     it("should also update the index when storing a session", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const session: SessionMetadata = {
         sessionId: "index-test" as SessionId,
@@ -269,7 +206,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return SessionStorageWriteError on R2 failure", async () => {
-      const bucket = createMockBucket({ failPut: true });
+      const bucket = createMockR2Bucket({ failPut: true });
 
       const session: SessionMetadata = {
         sessionId: "fail-write" as SessionId,
@@ -295,7 +232,7 @@ describe("SessionService (R2)", () => {
 
   describe("deleteSession", () => {
     it("should delete session and update index", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const session: SessionMetadata = {
         sessionId: "to-delete" as SessionId,
@@ -335,7 +272,7 @@ describe("SessionService (R2)", () => {
 
   describe("listSessions", () => {
     it("should list sessions from index", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const session1: SessionMetadata = {
         sessionId: "list-test-1" as SessionId,
@@ -380,7 +317,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return empty list when no sessions exist", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const program = Effect.gen(function* () {
         const storage = yield* SessionStorage;
@@ -394,7 +331,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should return SessionStorageReadError on R2 get failure", async () => {
-      const bucket = createMockBucket({ failGet: true });
+      const bucket = createMockR2Bucket({ failGet: true });
 
       const program = Effect.gen(function* () {
         const storage = yield* SessionStorage;
@@ -407,7 +344,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should support pagination with limit and offset", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
       const layer = makeSessionStorageLayer(bucket);
 
       // Create 5 sessions
@@ -476,7 +413,7 @@ describe("SessionService (R2)", () => {
 
   describe("update flow", () => {
     it("should update existing session", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const session: SessionMetadata = {
         sessionId: "update-test" as SessionId,
@@ -513,7 +450,7 @@ describe("SessionService (R2)", () => {
     });
 
     it("should update index when session is updated", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
       const layer = makeSessionStorageLayer(bucket);
 
       const session: SessionMetadata = {

@@ -375,11 +375,11 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         try {
           const rt = getRuntime(this.runtime);
 
-          // Get run from R2
+          // Get run from R2 (no sessionId needed - flat global index)
           const run = await rt.runPromise(
             Effect.gen(function* () {
               const runStorage = yield* RunStorage;
-              return yield* runStorage.getRun(params.sessionId, params.runId);
+              return yield* runStorage.getRun(params.runId);
             }),
           );
 
@@ -395,11 +395,11 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             return formatDomainError(error);
           }
 
-          // Get session for webUiUrl from R2
+          // Get session for webUiUrl from R2 (using sessionId from the run)
           const session = await rt.runPromise(
             Effect.gen(function* () {
               const sessionStorage = yield* SessionStorage;
-              return yield* sessionStorage.getSession(params.sessionId);
+              return yield* sessionStorage.getSession(run.value.sessionId);
             }),
           );
 
@@ -435,28 +435,32 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
   /**
    * Tool: opencode_list_runs
-   * List past task runs for a session.
+   * List past task runs with optional filters.
    */
   private registerListRunsTool(): void {
     this.server.registerTool(
       "opencode_list_runs",
       {
-        description: "List past task runs for a session. Use to discover old work or see history.",
+        description:
+          "List past task runs. Filter by session, status, or time. Use to discover old work or see history.",
         inputSchema: listRunsInputSchema,
       },
       async (params: ListRunsInput) => {
-        const telemetry = new ToolCallEventBuilder("opencode_list_runs", params.sessionId);
+        const telemetry = new ToolCallEventBuilder("opencode_list_runs", params.sessionId ?? "all");
         telemetry.startPhase("storage");
 
         try {
           const rt = getRuntime(this.runtime);
           const limit = params.limit ?? 10;
 
-          // Get runs from R2
+          // Get runs from R2 with optional filters
           const result = await rt.runPromise(
             Effect.gen(function* () {
               const runStorage = yield* RunStorage;
-              return yield* runStorage.listRuns(params.sessionId, {
+              return yield* runStorage.listRuns({
+                sessionId: params.sessionId,
+                status: params.status,
+                before: params.before,
                 limit: limit + 1, // Fetch one extra to check hasMore
               });
             }),
@@ -472,7 +476,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           return formatToolResponse({
             runs: returnRuns.map((r) => ({
               runId: r.runId,
-              sessionId: params.sessionId,
+              sessionId: r.sessionId, // Now from the run entry itself
               status: r.status,
               title: r.title,
               startedAt: r.startedAt,

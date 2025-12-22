@@ -165,9 +165,9 @@ export default {
       const sessionId = sessionMatch[1];
 
       // Look up session info from R2
-      // Session metadata is stored as JSON in R2 at sessions/{sessionId}/metadata.json
+      // Session metadata is stored as JSON in R2 at sessions/{sessionId}.json
       // This is written by the MCP agent when sessions are created/updated
-      const metadataKey = `sessions/${sessionId}/metadata.json`;
+      const metadataKey = `sessions/${sessionId}.json`;
       const metadataObject = await env.SESSIONS_BUCKET.get(metadataKey);
 
       let sessionInfo: {

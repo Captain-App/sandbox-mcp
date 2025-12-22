@@ -48,22 +48,31 @@ export type RunTaskInput = z.infer<typeof runTaskInputSchema>;
 
 /**
  * Schema for opencode_get_result tool input
- * Requires both sessionId and runId to locate the run in R2
+ * Only requires runId - runs are stored in a flat global index
  */
 export const getResultInputSchema = z.object({
-  sessionId: z.string().describe("Session ID from opencode_run_task."),
   runId: z.string().describe("Run ID from opencode_run_task."),
 });
 export type GetResultInput = z.infer<typeof getResultInputSchema>;
 
 /**
  * Schema for opencode_list_runs tool input
- * Lists runs for a specific session
+ * Lists runs with optional filters - sessionId no longer required
  */
 export const listRunsInputSchema = z.object({
-  sessionId: z.string().describe("Session ID to list runs for."),
+  sessionId: z.string().optional().describe("Filter by session ID."),
+
+  status: z
+    .enum(["started", "running", "completed", "failed"])
+    .optional()
+    .describe("Filter by status."),
 
   limit: z.number().int().min(1).max(100).default(10).describe("Max runs to return. Default 10."),
+
+  before: z
+    .number()
+    .optional()
+    .describe("Unix timestamp cursor. Returns runs started before this time."),
 });
 export type ListRunsInput = z.infer<typeof listRunsInputSchema>;
 

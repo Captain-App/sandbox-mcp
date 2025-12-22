@@ -102,7 +102,6 @@ Get the status and result of a task run.
 
 ```typescript
 {
-  sessionId: string,      // The session ID from run_task
   runId: string           // The run ID from run_task
 }
 ```
@@ -111,12 +110,14 @@ Get the status and result of a task run.
 
 ### `opencode_list_runs`
 
-List past task runs for a session.
+List past task runs with optional filters.
 
 ```typescript
 {
-  sessionId: string,      // The session to list runs for
-  limit?: number          // Max results (default 10)
+  sessionId?: string,     // Filter by session
+  status?: string,        // Filter by status: started, running, completed, failed
+  limit?: number,         // Max results (default 10)
+  before?: number         // Unix timestamp cursor for pagination
 }
 ```
 

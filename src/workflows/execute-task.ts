@@ -172,7 +172,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
       // Step 9: Complete run and update session in R2
       await step.do("complete-run", async () => {
-        await Run.completeRun(deps.sessionsBucket, params.sessionId, params.runId, {
+        await Run.completeRun(deps.sessionsBucket, params.runId, {
           success: result.success,
           output: result.output,
           error: result.error,
@@ -214,7 +214,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       };
 
       await step.do("complete-run-failure", async () => {
-        await Run.completeRun(deps.sessionsBucket, params.sessionId, params.runId, {
+        await Run.completeRun(deps.sessionsBucket, params.runId, {
           success: false,
           error: errorResult.error,
         });

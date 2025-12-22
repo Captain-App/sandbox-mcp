@@ -4,69 +4,8 @@ import { describe, expect, it } from "vitest";
 import { RunStorageReadError } from "../models/errors";
 import type { RunRecord } from "../models/run";
 import { DEFAULT_MODEL } from "../models/session";
+import { createMockR2Bucket } from "../test-utils/r2-mock";
 import { makeRunStorageLayer, RunStorage } from "./run";
-
-/**
- * Creates a mock R2 bucket for testing
- */
-const createMockBucket = (options?: { failGet?: boolean; failPut?: boolean }) => {
-  const store = new Map<string, string>();
-  let etagCounter = 0;
-  const etags = new Map<string, string>();
-
-  return {
-    get: async (key: string) => {
-      if (options?.failGet) {
-        throw new Error("Simulated R2 get failure");
-      }
-      const data = store.get(key);
-      if (!data) return null;
-      return {
-        json: async <T>() => JSON.parse(data) as T,
-        text: async () => data,
-        etag: etags.get(key) ?? "default-etag",
-      };
-    },
-    put: async (key: string, value: string, putOptions?: R2PutOptions) => {
-      if (options?.failPut) {
-        throw new Error("Simulated R2 put failure");
-      }
-
-      // Handle conditional writes (optimistic locking)
-      const onlyIf = putOptions?.onlyIf as { etagMatches?: string } | undefined;
-      if (onlyIf?.etagMatches) {
-        const currentEtag = etags.get(key);
-        if (currentEtag && currentEtag !== onlyIf.etagMatches) {
-          return null; // Conditional write failed
-        }
-      }
-
-      store.set(key, value);
-      const newEtag = `etag-${++etagCounter}`;
-      etags.set(key, newEtag);
-      return { etag: newEtag };
-    },
-    delete: async (key: string) => {
-      store.delete(key);
-      etags.delete(key);
-    },
-    list: async (listOptions: { prefix: string; limit?: number; cursor?: string }) => {
-      const objects: { key: string }[] = [];
-      for (const key of store.keys()) {
-        if (key.startsWith(listOptions.prefix)) {
-          objects.push({ key });
-        }
-      }
-      return {
-        objects: objects.slice(0, listOptions.limit ?? 100),
-        truncated: objects.length > (listOptions.limit ?? 100),
-        cursor: undefined,
-      };
-    },
-    // Expose store for test inspection
-    _store: store,
-  } as unknown as R2Bucket & { _store: Map<string, string> };
-};
 
 /**
  * Helper to run an effect with the RunStorage layer
@@ -110,14 +49,14 @@ function createTestRun(overrides?: Partial<RunRecord>): RunRecord {
 describe("RunStorage (R2)", () => {
   describe("getRun", () => {
     it("should store and retrieve run record", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const run = createTestRun();
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
         yield* storage.putRun(run);
-        return yield* storage.getRun(run.sessionId, run.runId);
+        return yield* storage.getRun(run.runId);
       });
 
       const result = await runWithStorage(bucket, program);
@@ -132,11 +71,11 @@ describe("RunStorage (R2)", () => {
     });
 
     it("should return None for non-existent run", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        return yield* storage.getRun("session-123", "non-existent-run");
+        return yield* storage.getRun("non-existent-run");
       });
 
       const result = await runWithStorage(bucket, program);
@@ -145,11 +84,11 @@ describe("RunStorage (R2)", () => {
     });
 
     it("should return RunStorageReadError on R2 failure", async () => {
-      const bucket = createMockBucket({ failGet: true });
+      const bucket = createMockR2Bucket({ failGet: true });
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        return yield* storage.getRun("session-123", "run-123");
+        return yield* storage.getRun("run-123");
       });
 
       const result = await runWithStorageExit(bucket, program);
@@ -160,7 +99,6 @@ describe("RunStorage (R2)", () => {
         expect(error._tag).toBe("Fail");
         if (error._tag === "Fail") {
           expect(error.error).toBeInstanceOf(RunStorageReadError);
-          expect((error.error as RunStorageReadError).sessionId).toBe("session-123");
           expect((error.error as RunStorageReadError).runId).toBe("run-123");
           expect((error.error as RunStorageReadError).cause).toContain("R2 get failed");
         }
@@ -168,13 +106,13 @@ describe("RunStorage (R2)", () => {
     });
 
     it("should return RunStorageReadError for invalid JSON", async () => {
-      const bucket = createMockBucket();
-      // Manually insert invalid JSON
-      bucket._store.set("sessions/session-123/runs/bad-run.json", "not-valid-json{");
+      const bucket = createMockR2Bucket();
+      // Manually insert invalid JSON at the new flat path
+      bucket._store.set("runs/bad-run.json", "not-valid-json{");
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        return yield* storage.getRun("session-123", "bad-run");
+        return yield* storage.getRun("bad-run");
       });
 
       const result = await runWithStorageExit(bucket, program);
@@ -191,16 +129,16 @@ describe("RunStorage (R2)", () => {
     });
 
     it("should return RunStorageReadError for schema validation failure", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
       // Insert valid JSON but invalid run schema (missing required fields)
       bucket._store.set(
-        "sessions/session-123/runs/invalid-run.json",
+        "runs/invalid-run.json",
         JSON.stringify({ runId: "invalid-run", wrongField: true }),
       );
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        return yield* storage.getRun("session-123", "invalid-run");
+        return yield* storage.getRun("invalid-run");
       });
 
       const result = await runWithStorageExit(bucket, program);
@@ -219,7 +157,7 @@ describe("RunStorage (R2)", () => {
 
   describe("putRun", () => {
     it("should store run at correct R2 key path", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const run = createTestRun({
         runId: "run-key-test",
@@ -233,11 +171,12 @@ describe("RunStorage (R2)", () => {
 
       await runWithStorage(bucket, program);
 
-      expect(bucket._store.has("sessions/session-key-test/runs/run-key-test.json")).toBe(true);
+      // New flat path: runs/{runId}.json
+      expect(bucket._store.has("runs/run-key-test.json")).toBe(true);
     });
 
-    it("should also update the index when storing a run", async () => {
-      const bucket = createMockBucket();
+    it("should also update the global index when storing a run", async () => {
+      const bucket = createMockR2Bucket();
 
       const run = createTestRun({
         runId: "run-index-test",
@@ -251,20 +190,21 @@ describe("RunStorage (R2)", () => {
 
       await runWithStorage(bucket, program);
 
-      // Check that the index was created/updated
-      expect(bucket._store.has("sessions/session-index-test/runs/_index.json")).toBe(true);
+      // Check that the global index was created/updated
+      expect(bucket._store.has("runs/_index.json")).toBe(true);
 
-      // Parse the index and verify the run is there
-      const indexJson = bucket._store.get("sessions/session-index-test/runs/_index.json");
+      // Parse the index and verify the run is there with sessionId
+      const indexJson = bucket._store.get("runs/_index.json");
       expect(indexJson).toBeDefined();
       const index = JSON.parse(indexJson as string);
       expect(index.runs["run-index-test"]).toBeDefined();
       expect(index.runs["run-index-test"].runId).toBe("run-index-test");
+      expect(index.runs["run-index-test"].sessionId).toBe("session-index-test");
       expect(index.runs["run-index-test"].status).toBe("started");
     });
 
     it("should update existing run", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const run = createTestRun();
 
@@ -284,7 +224,7 @@ describe("RunStorage (R2)", () => {
         };
         yield* storage.putRun(updated);
 
-        return yield* storage.getRun(run.sessionId, run.runId);
+        return yield* storage.getRun(run.runId);
       });
 
       const result = await runWithStorage(bucket, program);
@@ -297,7 +237,7 @@ describe("RunStorage (R2)", () => {
     });
 
     it("should return RunStorageWriteError on R2 failure", async () => {
-      const bucket = createMockBucket({ failPut: true });
+      const bucket = createMockR2Bucket({ failPut: true });
 
       const run = createTestRun();
 
@@ -313,20 +253,19 @@ describe("RunStorage (R2)", () => {
   });
 
   describe("listRuns", () => {
-    it("should list runs from index", async () => {
-      const bucket = createMockBucket();
-      const sessionId = "session-list-test";
+    it("should list all runs from global index", async () => {
+      const bucket = createMockR2Bucket();
 
       const run1 = createTestRun({
         runId: "run-1",
-        sessionId,
+        sessionId: "session-1",
         startedAt: Date.now() + 1000, // More recent
         title: "Run 1",
       });
 
       const run2 = createTestRun({
         runId: "run-2",
-        sessionId,
+        sessionId: "session-2",
         startedAt: Date.now(),
         title: "Run 2",
       });
@@ -335,7 +274,7 @@ describe("RunStorage (R2)", () => {
         const storage = yield* RunStorage;
         yield* storage.putRun(run1);
         yield* storage.putRun(run2);
-        return yield* storage.listRuns(sessionId);
+        return yield* storage.listRuns();
       });
 
       const result = await runWithStorage(bucket, program);
@@ -351,12 +290,79 @@ describe("RunStorage (R2)", () => {
       expect(result.runs[0].runId).toBe("run-1");
     });
 
-    it("should return empty list when no runs exist", async () => {
-      const bucket = createMockBucket();
+    it("should filter runs by sessionId", async () => {
+      const bucket = createMockR2Bucket();
+
+      const run1 = createTestRun({ runId: "run-1", sessionId: "session-A" });
+      const run2 = createTestRun({ runId: "run-2", sessionId: "session-B" });
+      const run3 = createTestRun({ runId: "run-3", sessionId: "session-A" });
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        return yield* storage.listRuns("empty-session");
+        yield* storage.putRun(run1);
+        yield* storage.putRun(run2);
+        yield* storage.putRun(run3);
+        return yield* storage.listRuns({ sessionId: "session-A" });
+      });
+
+      const result = await runWithStorage(bucket, program);
+
+      expect(result.runs.length).toBe(2);
+      expect(result.runs.every((r) => r.sessionId === "session-A")).toBe(true);
+    });
+
+    it("should filter runs by status", async () => {
+      const bucket = createMockR2Bucket();
+
+      const run1 = createTestRun({ runId: "run-1", status: "completed" });
+      const run2 = createTestRun({ runId: "run-2", status: "failed" });
+      const run3 = createTestRun({ runId: "run-3", status: "completed" });
+
+      const program = Effect.gen(function* () {
+        const storage = yield* RunStorage;
+        yield* storage.putRun(run1);
+        yield* storage.putRun(run2);
+        yield* storage.putRun(run3);
+        return yield* storage.listRuns({ status: "completed" });
+      });
+
+      const result = await runWithStorage(bucket, program);
+
+      expect(result.runs.length).toBe(2);
+      expect(result.runs.every((r) => r.status === "completed")).toBe(true);
+    });
+
+    it("should filter runs by before timestamp", async () => {
+      const bucket = createMockR2Bucket();
+      const now = Date.now();
+
+      const run1 = createTestRun({ runId: "run-1", startedAt: now - 2000 }); // 2s ago
+      const run2 = createTestRun({ runId: "run-2", startedAt: now - 1000 }); // 1s ago
+      const run3 = createTestRun({ runId: "run-3", startedAt: now }); // now
+
+      const program = Effect.gen(function* () {
+        const storage = yield* RunStorage;
+        yield* storage.putRun(run1);
+        yield* storage.putRun(run2);
+        yield* storage.putRun(run3);
+        // Get runs started before 500ms ago (should exclude run-3)
+        return yield* storage.listRuns({ before: now - 500 });
+      });
+
+      const result = await runWithStorage(bucket, program);
+
+      expect(result.runs.length).toBe(2);
+      expect(result.runs.map((r) => r.runId)).toContain("run-1");
+      expect(result.runs.map((r) => r.runId)).toContain("run-2");
+      expect(result.runs.map((r) => r.runId)).not.toContain("run-3");
+    });
+
+    it("should return empty list when no runs exist", async () => {
+      const bucket = createMockR2Bucket();
+
+      const program = Effect.gen(function* () {
+        const storage = yield* RunStorage;
+        return yield* storage.listRuns();
       });
 
       const result = await runWithStorage(bucket, program);
@@ -366,11 +372,11 @@ describe("RunStorage (R2)", () => {
     });
 
     it("should return RunStorageReadError on R2 get failure", async () => {
-      const bucket = createMockBucket({ failGet: true });
+      const bucket = createMockR2Bucket({ failGet: true });
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        return yield* storage.listRuns("session-123");
+        return yield* storage.listRuns();
       });
 
       const result = await runWithStorageExit(bucket, program);
@@ -378,16 +384,15 @@ describe("RunStorage (R2)", () => {
       expect(Exit.isFailure(result)).toBe(true);
     });
 
-    it("should support pagination with limit and offset", async () => {
-      const bucket = createMockBucket();
+    it("should support pagination with limit", async () => {
+      const bucket = createMockR2Bucket();
       const layer = makeRunStorageLayer(bucket);
-      const sessionId = "session-paginated";
 
       // Create 5 runs
       for (let i = 0; i < 5; i++) {
         const run = createTestRun({
           runId: `run-${i}`,
-          sessionId,
+          sessionId: "session-paginated",
           startedAt: Date.now() + i * 1000, // Different start times
           title: `Run ${i}`,
         });
@@ -407,7 +412,7 @@ describe("RunStorage (R2)", () => {
         Effect.provide(
           Effect.gen(function* () {
             const storage = yield* RunStorage;
-            return yield* storage.listRuns(sessionId, { limit: 2, offset: 0 });
+            return yield* storage.listRuns({ limit: 2 });
           }),
           layer,
         ),
@@ -415,42 +420,28 @@ describe("RunStorage (R2)", () => {
       expect(page1.runs.length).toBe(2);
       expect(page1.total).toBe(5);
 
-      // Get next 2 runs
+      // Use before cursor for pagination (get runs before the oldest in page1)
+      const oldestInPage1 = page1.runs[page1.runs.length - 1];
       const page2 = await Effect.runPromise(
         Effect.provide(
           Effect.gen(function* () {
             const storage = yield* RunStorage;
-            return yield* storage.listRuns(sessionId, { limit: 2, offset: 2 });
+            return yield* storage.listRuns({ limit: 2, before: oldestInPage1.startedAt });
           }),
           layer,
         ),
       );
       expect(page2.runs.length).toBe(2);
-      expect(page2.total).toBe(5);
-
-      // Get last run
-      const page3 = await Effect.runPromise(
-        Effect.provide(
-          Effect.gen(function* () {
-            const storage = yield* RunStorage;
-            return yield* storage.listRuns(sessionId, { limit: 2, offset: 4 });
-          }),
-          layer,
-        ),
-      );
-      expect(page3.runs.length).toBe(1);
-      expect(page3.total).toBe(5);
     });
   });
 
   describe("deleteRun", () => {
-    it("should delete run and update index", async () => {
-      const bucket = createMockBucket();
-      const sessionId = "session-delete";
+    it("should delete run and update global index", async () => {
+      const bucket = createMockR2Bucket();
 
       const run = createTestRun({
         runId: "run-to-delete",
-        sessionId,
+        sessionId: "session-delete",
       });
 
       const program = Effect.gen(function* () {
@@ -458,73 +449,70 @@ describe("RunStorage (R2)", () => {
         yield* storage.putRun(run);
 
         // Verify run exists
-        const before = yield* storage.getRun(sessionId, run.runId);
+        const before = yield* storage.getRun(run.runId);
         expect(Option.isSome(before)).toBe(true);
 
-        yield* storage.deleteRun(sessionId, run.runId);
+        yield* storage.deleteRun(run.runId);
 
         // Verify run is gone
-        const after = yield* storage.getRun(sessionId, run.runId);
+        const after = yield* storage.getRun(run.runId);
         return after;
       });
 
       const result = await runWithStorage(bucket, program);
       expect(Option.isNone(result)).toBe(true);
 
-      // Verify run was removed from index
-      const indexJson = bucket._store.get("sessions/session-delete/runs/_index.json");
+      // Verify run was removed from global index
+      const indexJson = bucket._store.get("runs/_index.json");
       expect(indexJson).toBeDefined();
       const index = JSON.parse(indexJson as string);
       expect(index.runs["run-to-delete"]).toBeUndefined();
     });
   });
 
-  describe("deleteAllRuns", () => {
-    it("should delete all runs and index for a session", async () => {
-      const bucket = createMockBucket();
+  describe("deleteRunsForSession", () => {
+    it("should delete all runs for a session and update global index", async () => {
+      const bucket = createMockR2Bucket();
       const sessionId = "session-delete-all";
 
-      const run1 = createTestRun({
-        runId: "run-1",
-        sessionId,
-      });
-
-      const run2 = createTestRun({
-        runId: "run-2",
-        sessionId,
-      });
+      const run1 = createTestRun({ runId: "run-1", sessionId });
+      const run2 = createTestRun({ runId: "run-2", sessionId });
+      const run3 = createTestRun({ runId: "run-3", sessionId: "other-session" }); // Different session
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
         yield* storage.putRun(run1);
         yield* storage.putRun(run2);
+        yield* storage.putRun(run3);
 
         // Verify runs exist
-        const listBefore = yield* storage.listRuns(sessionId);
+        const listBefore = yield* storage.listRuns({ sessionId });
         expect(listBefore.total).toBe(2);
 
-        yield* storage.deleteAllRuns(sessionId);
+        yield* storage.deleteRunsForSession(sessionId);
 
-        // Verify all runs are gone
-        const listAfter = yield* storage.listRuns(sessionId);
-        return listAfter;
+        // Verify session runs are gone but other session's runs remain
+        const listAfter = yield* storage.listRuns({ sessionId });
+        const otherSessionRuns = yield* storage.listRuns({ sessionId: "other-session" });
+        return { deleted: listAfter, remaining: otherSessionRuns };
       });
 
       const result = await runWithStorage(bucket, program);
-      expect(result.total).toBe(0);
+      expect(result.deleted.total).toBe(0);
+      expect(result.remaining.total).toBe(1);
 
-      // Verify index and run files are deleted
-      expect(bucket._store.has("sessions/session-delete-all/runs/_index.json")).toBe(false);
-      expect(bucket._store.has("sessions/session-delete-all/runs/run-1.json")).toBe(false);
-      expect(bucket._store.has("sessions/session-delete-all/runs/run-2.json")).toBe(false);
+      // Verify run files are deleted
+      expect(bucket._store.has("runs/run-1.json")).toBe(false);
+      expect(bucket._store.has("runs/run-2.json")).toBe(false);
+      expect(bucket._store.has("runs/run-3.json")).toBe(true); // Other session's run still exists
     });
 
-    it("should succeed even when no runs exist", async () => {
-      const bucket = createMockBucket();
+    it("should succeed even when no runs exist for session", async () => {
+      const bucket = createMockR2Bucket();
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
-        yield* storage.deleteAllRuns("empty-session");
+        yield* storage.deleteRunsForSession("empty-session");
         return "success";
       });
 
@@ -536,15 +524,13 @@ describe("RunStorage (R2)", () => {
   describe("concurrent modification retry", () => {
     it("should retry and succeed when index is modified concurrently", async () => {
       // Create a bucket that simulates concurrent modification
-      // The first conditional write attempt will fail due to etag mismatch, but retry should succeed
       const store = new Map<string, string>();
       let etagCounter = 0;
       const etags = new Map<string, string>();
       let indexWriteAttempts = 0;
 
       // Pre-populate an index so that conditional writes (with etag) are used
-      const sessionId = "session-concurrent";
-      const indexKey = `sessions/${sessionId}/runs/_index.json`;
+      const indexKey = "runs/_index.json";
       const initialIndex = {
         version: 1,
         runs: {},
@@ -570,9 +556,8 @@ describe("RunStorage (R2)", () => {
             indexWriteAttempts++;
 
             // Simulate concurrent modification on first conditional write only
-            // Another process changes the etag between our read and write
             if (indexWriteAttempts === 1) {
-              // First, write the data (simulating another process's write)
+              // Write the data (simulating another process's write)
               store.set(key, value);
               // But use a different etag than expected (simulating concurrent modification)
               const newEtag = `concurrent-etag-${++etagCounter}`;
@@ -595,13 +580,13 @@ describe("RunStorage (R2)", () => {
 
       const run = createTestRun({
         runId: "run-concurrent-test",
-        sessionId,
+        sessionId: "session-concurrent",
       });
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
         yield* storage.putRun(run);
-        return yield* storage.getRun(run.sessionId, run.runId);
+        return yield* storage.getRun(run.runId);
       });
 
       const result = await runWithStorage(bucket, program);
@@ -619,7 +604,7 @@ describe("RunStorage (R2)", () => {
 
   describe("update flow", () => {
     it("should update existing run status", async () => {
-      const bucket = createMockBucket();
+      const bucket = createMockR2Bucket();
 
       const run = createTestRun();
 
@@ -639,7 +624,7 @@ describe("RunStorage (R2)", () => {
         };
         yield* storage.putRun(updated);
 
-        return yield* storage.getRun(run.sessionId, run.runId);
+        return yield* storage.getRun(run.runId);
       });
 
       const result = await runWithStorage(bucket, program);
@@ -652,14 +637,13 @@ describe("RunStorage (R2)", () => {
       }
     });
 
-    it("should update index when run is updated", async () => {
-      const bucket = createMockBucket();
+    it("should update global index when run is updated", async () => {
+      const bucket = createMockR2Bucket();
       const layer = makeRunStorageLayer(bucket);
-      const sessionId = "session-update-idx";
 
       const run = createTestRun({
         runId: "run-idx-update",
-        sessionId,
+        sessionId: "session-update-idx",
         title: "Original Title",
       });
 
@@ -690,8 +674,8 @@ describe("RunStorage (R2)", () => {
         ),
       );
 
-      // Verify index was updated
-      const indexJson = bucket._store.get("sessions/session-update-idx/runs/_index.json");
+      // Verify global index was updated
+      const indexJson = bucket._store.get("runs/_index.json");
       expect(indexJson).toBeDefined();
       const index = JSON.parse(indexJson as string);
       expect(index.runs["run-idx-update"].status).toBe("completed");

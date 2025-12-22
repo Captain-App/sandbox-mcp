@@ -65,32 +65,27 @@ describe("Error Models", () => {
   describe("Run Storage Errors", () => {
     it("should create RunStorageReadError with runId", () => {
       const error = new RunStorageReadError({
-        sessionId: "session-123",
         runId: "run-456",
         cause: "R2 get failed",
       });
 
       expect(error._tag).toBe("RunStorageReadError");
-      expect(error.sessionId).toBe("session-123");
       expect(error.runId).toBe("run-456");
       expect(error.message).toContain("run-456");
-      expect(error.message).toContain("session-123");
     });
 
     it("should create RunStorageReadError without runId", () => {
       const error = new RunStorageReadError({
-        sessionId: "session-123",
         cause: "R2 get failed",
       });
 
       expect(error._tag).toBe("RunStorageReadError");
       expect(error.runId).toBeUndefined();
-      expect(error.message).toContain("session-123");
+      expect(error.message).toContain("Failed to read runs");
     });
 
     it("should identify run storage errors with type guard", () => {
       const error = new RunStorageReadError({
-        sessionId: "test",
         cause: "test",
       });
 
