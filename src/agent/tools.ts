@@ -2,7 +2,7 @@
 import { z } from "zod";
 
 import { TASK_MAX_LENGTH } from "../models/run";
-import { GITHUB_URL_PREFIX } from "../models/session";
+import { DEFAULT_MODEL, GITHUB_URL_PREFIX } from "../models/session";
 
 /**
  * MCP tool schemas using Zod (required by MCP SDK)
@@ -36,7 +36,7 @@ export const runTaskInputSchema = z.object({
 
   branch: z.string().optional().describe("Git branch to checkout. Defaults to 'main'."),
 
-  model: z.string().optional().describe("AI model to use. Defaults to claude-sonnet-4-20250514."),
+  model: z.string().optional().describe(`AI model to use. Defaults to ${DEFAULT_MODEL}.`),
 
   title: z
     .string()
@@ -48,31 +48,22 @@ export type RunTaskInput = z.infer<typeof runTaskInputSchema>;
 
 /**
  * Schema for opencode_get_result tool input
- * Simplified to just runId - no session context needed
+ * Requires both sessionId and runId to locate the run in R2
  */
 export const getResultInputSchema = z.object({
+  sessionId: z.string().describe("Session ID from opencode_run_task."),
   runId: z.string().describe("Run ID from opencode_run_task."),
 });
 export type GetResultInput = z.infer<typeof getResultInputSchema>;
 
 /**
  * Schema for opencode_list_runs tool input
- * Enables discovery of past work with filtering and pagination
+ * Lists runs for a specific session
  */
 export const listRunsInputSchema = z.object({
-  sessionId: z.string().optional().describe("Filter by session."),
-
-  status: z
-    .enum(["started", "running", "completed", "failed"])
-    .optional()
-    .describe("Filter by status."),
+  sessionId: z.string().describe("Session ID to list runs for."),
 
   limit: z.number().int().min(1).max(100).default(10).describe("Max runs to return. Default 10."),
-
-  before: z
-    .number()
-    .optional()
-    .describe("Unix timestamp cursor for pagination. Returns runs started before this time."),
 });
 export type ListRunsInput = z.infer<typeof listRunsInputSchema>;
 

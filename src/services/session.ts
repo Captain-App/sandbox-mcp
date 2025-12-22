@@ -15,8 +15,8 @@ import { SessionMetadata } from "../models/session";
  * accessed from any worker or DO instance, solving the cross-DO access problem
  * inherent in the MCP library's per-connection DO model.
  *
- * Note: Run records are stored separately in DO SQLite via StorageService,
- * since they are transient and tied to workflow execution.
+ * Note: Run records are stored separately in R2 via RunStorage
+ * (see src/services/run.ts) using a per-session index pattern.
  */
 
 // =============================================================================
@@ -92,6 +92,9 @@ interface SessionStorageService {
   /**
    * Delete a session by ID
    * Also removes from the session index
+   *
+   * IMPORTANT: Callers should delete all runs for this session first
+   * using RunStorage.deleteAllRuns(sessionId) to avoid orphaned run data.
    */
   readonly deleteSession: (
     sessionId: string,

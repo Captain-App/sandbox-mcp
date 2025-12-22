@@ -65,8 +65,9 @@ describe("MCP Tool Schemas", () => {
   });
 
   describe("getResultInputSchema", () => {
-    it("should validate get result input", () => {
+    it("should validate get result input with sessionId and runId", () => {
       const valid = {
+        sessionId: "sess-abc123",
         runId: "run-abc123",
       };
 
@@ -74,8 +75,19 @@ describe("MCP Tool Schemas", () => {
       expect(result.success).toBe(true);
     });
 
+    it("should require sessionId", () => {
+      const invalid = {
+        runId: "run-abc123",
+      };
+
+      const result = getResultInputSchema.safeParse(invalid);
+      expect(result.success).toBe(false);
+    });
+
     it("should require runId", () => {
-      const invalid = {};
+      const invalid = {
+        sessionId: "sess-abc123",
+      };
 
       const result = getResultInputSchema.safeParse(invalid);
       expect(result.success).toBe(false);
@@ -83,47 +95,36 @@ describe("MCP Tool Schemas", () => {
   });
 
   describe("listRunsInputSchema", () => {
-    it("should validate list runs with no filters", () => {
-      const valid = {};
-
-      const result = listRunsInputSchema.safeParse(valid);
-      expect(result.success).toBe(true);
-    });
-
-    it("should validate list runs with all filters", () => {
+    it("should validate list runs with sessionId", () => {
       const valid = {
         sessionId: "sess-abc123",
-        status: "completed",
-        limit: 20,
-        before: Date.now(),
       };
 
       const result = listRunsInputSchema.safeParse(valid);
       expect(result.success).toBe(true);
     });
 
-    it("should validate status enum values", () => {
-      const statuses = ["started", "running", "completed", "failed"];
+    it("should validate list runs with optional limit", () => {
+      const valid = {
+        sessionId: "sess-abc123",
+        limit: 20,
+      };
 
-      for (const status of statuses) {
-        const result = listRunsInputSchema.safeParse({ status });
-        expect(result.success).toBe(true);
-      }
+      const result = listRunsInputSchema.safeParse(valid);
+      expect(result.success).toBe(true);
     });
 
-    it("should reject invalid status", () => {
-      const invalid = {
-        status: "queued", // No longer valid
-      };
+    it("should require sessionId", () => {
+      const invalid = {};
 
       const result = listRunsInputSchema.safeParse(invalid);
       expect(result.success).toBe(false);
     });
 
     it("should enforce limit bounds", () => {
-      expect(listRunsInputSchema.safeParse({ limit: 0 }).success).toBe(false);
-      expect(listRunsInputSchema.safeParse({ limit: 101 }).success).toBe(false);
-      expect(listRunsInputSchema.safeParse({ limit: 50 }).success).toBe(true);
+      expect(listRunsInputSchema.safeParse({ sessionId: "test", limit: 0 }).success).toBe(false);
+      expect(listRunsInputSchema.safeParse({ sessionId: "test", limit: 101 }).success).toBe(false);
+      expect(listRunsInputSchema.safeParse({ sessionId: "test", limit: 50 }).success).toBe(true);
     });
   });
 

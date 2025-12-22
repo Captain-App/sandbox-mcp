@@ -26,10 +26,10 @@ export const RunResult = Schema.Struct({
 export type RunResult = typeof RunResult.Type;
 
 /**
- * Complete run record stored in DO
+ * Complete run record stored in R2
  */
 export const RunRecord = Schema.Struct({
-  runId: Schema.String, // Note: Stored as string in DB, branded type used for new IDs
+  runId: Schema.String,
   sessionId: Schema.String,
   workflowId: Schema.String,
   status: RunStatus,

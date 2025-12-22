@@ -1,6 +1,11 @@
 import { Schema } from "effect";
 
 /**
+ * Default AI model for OpenCode sessions
+ */
+export const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+
+/**
  * Validation constants for session IDs
  * Session ID: alphanumeric with hyphens, no leading/trailing hyphens
  * Allows: "abc", "a", "abc-123", "my-session-1"

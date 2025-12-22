@@ -12,7 +12,11 @@ export interface TaskParams {
   task: string;
   model: string;
   runId: string;
-  doId: string; // Durable Object ID for RPC callback
+  /**
+   * Short label for the task (2-5 words).
+   * Passed from MCP tool for initial run record.
+   */
+  title: string;
   repositoryUrl?: string;
   branch?: string;
   /**
@@ -54,13 +58,6 @@ export interface TaskResult {
 }
 
 /**
- * Stub type for DO RPC callback
- */
-export interface McpAgentStub {
-  onTaskComplete: (params: { runId: string; result: TaskResult }) => Promise<void>;
-}
-
-/**
  * Dependencies required by workflow helpers.
  *
  * Simplified for zero-trust model - no secrets needed here.
@@ -70,8 +67,6 @@ export interface McpAgentStub {
 export interface WorkflowDeps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sandboxBinding: DurableObjectNamespace<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  mcpAgentBinding: DurableObjectNamespace<any>;
   sessionsBucket: R2Bucket;
 }
 

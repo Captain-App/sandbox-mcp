@@ -102,6 +102,7 @@ Get the status and result of a task run.
 
 ```typescript
 {
+  sessionId: string,      // The session ID from run_task
   runId: string           // The run ID from run_task
 }
 ```
@@ -110,14 +111,12 @@ Get the status and result of a task run.
 
 ### `opencode_list_runs`
 
-List past task runs with optional filtering.
+List past task runs for a session.
 
 ```typescript
 {
-  sessionId?: string,     // Filter by session
-  status?: string,        // Filter by status
-  limit?: number,         // Max results (default 10)
-  before?: number         // Pagination cursor
+  sessionId: string,      // The session to list runs for
+  limit?: number          // Max results (default 10)
 }
 ```
 
@@ -199,7 +198,7 @@ src/
 │   └── services/         # Service-specific proxy logic
 ├── services/
 │   ├── session.ts        # R2 session storage
-│   └── storage.ts        # DO SQLite run storage
+│   └── run.ts            # R2 run storage
 └── models/
     ├── session.ts        # Session schema
     ├── run.ts            # Run record schema

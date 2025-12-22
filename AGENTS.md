@@ -93,7 +93,7 @@ export const myToolInputSchema = {
 ### Storage Split
 
 - **Sessions in R2**: Cross-DO access (MCP lib creates separate DO per connection)
-- **Runs in DO SQLite**: Fast, local, transient (tied to workflow execution)
+- **Runs in R2**: Cross-DO access, per-session index pattern (see `src/services/run.ts`)
 
 ### Zero-Trust Proxy
 
@@ -124,7 +124,7 @@ src/
 │   └── services/         # Per-service proxy logic
 ├── services/
 │   ├── session.ts        # R2 session storage (Effect service)
-│   └── storage.ts        # DO SQLite storage (Effect service)
+│   └── run.ts            # R2 run storage (Effect service)
 └── models/
     ├── session.ts        # SessionMetadata schema
     ├── run.ts            # RunRecord schema
@@ -147,7 +147,7 @@ src/
 
 ### Modifying Storage
 
-Sessions are in R2 via `SessionStorage` service. Runs are in DO SQLite via `StorageService`.
+Sessions are in R2 via `SessionStorage` service. Runs are in R2 via `RunStorage` service.
 
 To add a field to SessionMetadata:
 1. Update schema in `src/models/session.ts`
@@ -200,6 +200,7 @@ Pre-commit hooks run lint and format checks automatically.
 | `src/workflows/execute-task.ts` | Task execution flow |
 | `src/proxy/handler.ts` | Zero-trust proxy routing |
 | `src/services/session.ts` | R2 session storage with index |
+| `src/services/run.ts` | R2 run storage with per-session index |
 
 ## Gotchas
 

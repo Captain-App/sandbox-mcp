@@ -5,13 +5,13 @@ import * as Predicate from "effect/Predicate";
 export const SessionErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/SessionError");
 export type SessionErrorTypeId = typeof SessionErrorTypeId;
 
-export const StorageErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/StorageError");
-export type StorageErrorTypeId = typeof StorageErrorTypeId;
-
 export const SessionStorageErrorTypeId: unique symbol = Symbol.for(
   "@sandbox-mcp/SessionStorageError",
 );
 export type SessionStorageErrorTypeId = typeof SessionStorageErrorTypeId;
+
+export const RunStorageErrorTypeId: unique symbol = Symbol.for("@sandbox-mcp/RunStorageError");
+export type RunStorageErrorTypeId = typeof RunStorageErrorTypeId;
 
 // --- Session Errors ---
 
@@ -42,40 +42,6 @@ type SessionError = SessionNotFoundError | RunNotFoundError;
 
 export const isSessionError = (u: unknown): u is SessionError =>
   Predicate.hasProperty(u, SessionErrorTypeId);
-
-// --- Storage Errors ---
-
-export class StorageReadError extends Schema.TaggedError<StorageReadError>()("StorageReadError", {
-  key: Schema.String,
-  cause: Schema.String,
-}) {
-  /** @public Used by isStorageError type guard */
-  readonly [StorageErrorTypeId]: StorageErrorTypeId = StorageErrorTypeId;
-
-  override get message(): string {
-    return `Failed to read key "${this.key}": ${this.cause}`;
-  }
-}
-
-export class StorageWriteError extends Schema.TaggedError<StorageWriteError>()(
-  "StorageWriteError",
-  {
-    key: Schema.String,
-    cause: Schema.String,
-  },
-) {
-  /** @public Used by isStorageError type guard */
-  readonly [StorageErrorTypeId]: StorageErrorTypeId = StorageErrorTypeId;
-
-  override get message(): string {
-    return `Failed to write key "${this.key}": ${this.cause}`;
-  }
-}
-
-type StorageError = StorageReadError | StorageWriteError;
-
-export const isStorageError = (u: unknown): u is StorageError =>
-  Predicate.hasProperty(u, StorageErrorTypeId);
 
 // --- Session Storage Errors (R2) ---
 
@@ -119,3 +85,54 @@ type SessionStorageError = SessionStorageReadError | SessionStorageWriteError;
 
 export const isSessionStorageError = (u: unknown): u is SessionStorageError =>
   Predicate.hasProperty(u, SessionStorageErrorTypeId);
+
+// --- Run Storage Errors (R2) ---
+
+/**
+ * Error reading run from R2 storage
+ */
+export class RunStorageReadError extends Schema.TaggedError<RunStorageReadError>()(
+  "RunStorageReadError",
+  {
+    sessionId: Schema.String,
+    runId: Schema.optionalWith(Schema.String, { exact: true }),
+    cause: Schema.String,
+  },
+) {
+  /** @public Used by isRunStorageError type guard */
+  readonly [RunStorageErrorTypeId]: RunStorageErrorTypeId = RunStorageErrorTypeId;
+
+  override get message(): string {
+    if (this.runId) {
+      return `Failed to read run "${this.runId}" in session "${this.sessionId}": ${this.cause}`;
+    }
+    return `Failed to read runs for session "${this.sessionId}": ${this.cause}`;
+  }
+}
+
+/**
+ * Error writing run to R2 storage
+ */
+export class RunStorageWriteError extends Schema.TaggedError<RunStorageWriteError>()(
+  "RunStorageWriteError",
+  {
+    sessionId: Schema.String,
+    runId: Schema.optionalWith(Schema.String, { exact: true }),
+    cause: Schema.String,
+  },
+) {
+  /** @public Used by isRunStorageError type guard */
+  readonly [RunStorageErrorTypeId]: RunStorageErrorTypeId = RunStorageErrorTypeId;
+
+  override get message(): string {
+    if (this.runId) {
+      return `Failed to write run "${this.runId}" in session "${this.sessionId}": ${this.cause}`;
+    }
+    return `Failed to write runs for session "${this.sessionId}": ${this.cause}`;
+  }
+}
+
+type RunStorageError = RunStorageReadError | RunStorageWriteError;
+
+export const isRunStorageError = (u: unknown): u is RunStorageError =>
+  Predicate.hasProperty(u, RunStorageErrorTypeId);
