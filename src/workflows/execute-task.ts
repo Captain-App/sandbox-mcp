@@ -91,6 +91,14 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
       const workingDirectory = sandboxResult.workspacePath;
 
+      // Step 2.5: Update session with workspace path immediately for web UI access
+      await step.do("update-workspace-path", async () => {
+        await Run.updateSessionAfterRun(deps.sessionsBucket, params.sessionId, {
+          workspacePath: workingDirectory,
+        });
+        return { updated: true };
+      });
+
       // Step 3: Start OpenCode and execute task
       const executeResult = await step.do(
         "execute-opencode-task",
