@@ -171,14 +171,10 @@ async function cloneRepository(
   }
 
   // Clone the repository
-  // Note: Must use sandbox.exec() for git clone (not sandbox.gitCheckout())
-  // so that the git URL rewriting config is respected for proxy authentication
-  const branchFlag = branch ? `-b ${branch}` : "";
-  const cloneResult = await sandbox.exec(`git clone ${branchFlag} ${url} ${targetDir}`);
-
-  if (cloneResult.exitCode !== 0) {
-    throw new Error(`Git clone failed: ${cloneResult.stderr}`);
-  }
+  await sandbox.gitCheckout(url, {
+    branch: branch ?? "main",
+    targetDir,
+  });
 
   return targetDir;
 }
