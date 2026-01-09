@@ -210,7 +210,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       "opencode_run_task",
       {
         description:
-          "Execute a coding task in a sandbox. Creates session if needed, or continues existing session.",
+          "Execute a coding task in a sandbox. Creates session if needed, or continues existing session. Returns immediately with status 'started'. IMPORTANT: (1) Share the webUiUrl with the user for real-time progress tracking. (2) Poll opencode_get_result every 10-30 seconds using the returned runId until status is 'completed' or 'failed' to get the final result.",
         inputSchema: runTaskInputSchema,
       },
       async (params: RunTaskInput) => {
@@ -392,7 +392,8 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     this.server.registerTool(
       "opencode_get_result",
       {
-        description: "Get the status and result of a specific task run.",
+        description:
+          "Get the status and result of a specific task run. Use this to poll for completion after calling opencode_run_task. Poll every 10-30 seconds until status is 'completed' or 'failed'. Status values: 'started' (just queued), 'running' (in progress), 'completed' (success), 'failed' (error).",
         inputSchema: getResultInputSchema,
       },
       async (params: GetResultInput) => {
@@ -469,7 +470,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
       "opencode_list_runs",
       {
         description:
-          "List past task runs. Filter by session, status, or time. Use to discover old work or see history.",
+          "List past task runs with pagination support. Filter by session, status, or time. Use to: (1) Resume work from previous sessions, (2) Check history of completed tasks, (3) Find sessionId for continuing work. Returns most recent runs first.",
         inputSchema: listRunsInputSchema,
       },
       async (params: ListRunsInput) => {
