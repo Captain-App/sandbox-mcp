@@ -64,6 +64,7 @@ export const SessionMetadata = Schema.Struct({
   status: SessionStatus,
   workspacePath: Schema.String,
   webUiUrl: Schema.String,
+  userId: Schema.optionalWith(Schema.String, { exact: true }),
   repository: Schema.optionalWith(RepositoryInfo, { exact: true }),
   title: Schema.optionalWith(Schema.String, { exact: true }),
   config: SessionConfig,

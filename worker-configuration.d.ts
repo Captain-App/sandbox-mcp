@@ -15,6 +15,8 @@ declare namespace Cloudflare {
 		Sandbox: DurableObjectNamespace<import("./src/index").Sandbox>;
 		SESSIONS_BUCKET: R2Bucket;
 		EXECUTE_TASK_WORKFLOW: Workflow<Parameters<import("./src/index").ExecuteTaskWorkflow['run']>[0]['payload']>;
+		SHIPBOX_API: Fetcher;
+		SENTRY_DSN?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
