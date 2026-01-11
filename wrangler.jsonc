@@ -62,7 +62,8 @@
 	// Environment variables
 	// Secrets (R2 creds, ANTHROPIC_API_KEY, GITHUB_TOKEN) via wrangler secret put
 	"vars": {
-		"ENVIRONMENT": "development"
+		"ENVIRONMENT": "development",
+		"SENTRY_DSN": ""
 	},
 
 	"services": [
