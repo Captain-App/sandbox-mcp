@@ -49,6 +49,7 @@ const SessionConfig = Schema.Struct({
   defaultModel: Schema.String.pipe(
     Schema.annotations({ description: "Default AI model for OpenCode" }),
   ),
+  region: Schema.optionalWith(Schema.String, { exact: true }),
 });
 
 /**

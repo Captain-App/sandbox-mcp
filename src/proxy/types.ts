@@ -12,6 +12,8 @@
 export interface ProxyTokenPayload {
   /** Sandbox identifier (required claim) */
   sandboxId: string;
+  /** User identifier (required claim) */
+  userId: string;
   /** Session identifier (optional claim) */
   sessionId?: string;
   /** Expiration time (Unix timestamp) */
@@ -28,6 +30,8 @@ export interface CreateProxyTokenOptions {
   secret: string;
   /** Sandbox identifier to embed in token */
   sandboxId: string;
+  /** User identifier to embed in token */
+  userId: string;
   /** Optional session identifier */
   sessionId?: string;
   /**

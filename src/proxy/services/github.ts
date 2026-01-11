@@ -32,7 +32,21 @@ export const github: ServiceConfig<Env> = {
   validate: (req) => req.headers.get("Authorization")?.replace("Bearer ", "") ?? null,
 
   transform: async (req, ctx) => {
-    if (!ctx.env.GITHUB_TOKEN) {
+    // 1. Fetch user config from shipbox-api via service binding
+    const res = await ctx.env.SHIPBOX_API.fetch(
+      `http://api/internal/user-config/${ctx.jwt.userId}`,
+    );
+
+    let githubToken = ctx.env.GITHUB_TOKEN;
+
+    if (res.ok) {
+      const config = (await res.json()) as { githubToken: string | null };
+      if (config.githubToken) {
+        githubToken = config.githubToken;
+      }
+    }
+
+    if (!githubToken) {
       return new Response("GITHUB_TOKEN not configured", { status: 500 });
     }
 
@@ -45,7 +59,7 @@ export const github: ServiceConfig<Env> = {
     }
 
     // Use Basic auth with x-access-token (GitHub's preferred method for tokens)
-    req.headers.set("Authorization", `Basic ${btoa(`x-access-token:${ctx.env.GITHUB_TOKEN}`)}`);
+    req.headers.set("Authorization", `Basic ${btoa(`x-access-token:${githubToken}`)}`);
     req.headers.set("User-Agent", "Sandbox-Git-Proxy");
 
     return req;

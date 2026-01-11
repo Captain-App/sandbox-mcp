@@ -62,10 +62,11 @@ export const createProxyToken = (
 ): Effect.Effect<string, ProxyTokenInvalidError> =>
   Effect.tryPromise({
     try: async () => {
-      const { secret, sandboxId, sessionId, expiresIn = "15m" } = options;
+      const { secret, sandboxId, userId, sessionId, expiresIn = "15m" } = options;
 
       if (!secret) throw new Error("JWT secret is required");
       if (!sandboxId) throw new Error("Sandbox ID is required");
+      if (!userId) throw new Error("User ID is required");
 
       const secretKey = new TextEncoder().encode(secret);
       const expirationSeconds = parseExpiresIn(expiresIn);
@@ -73,6 +74,7 @@ export const createProxyToken = (
 
       return new SignJWT({
         sandboxId,
+        userId,
         ...(sessionId && { sessionId }),
       })
         .setProtectedHeader({ alg: "HS256" })
@@ -123,6 +125,9 @@ const verifyProxyToken = (
       if (typeof payload.sandboxId !== "string") {
         throw new Error("Missing sandboxId in token");
       }
+      if (typeof payload.userId !== "string") {
+        throw new Error("Missing userId in token");
+      }
       if (typeof payload.exp !== "number") {
         throw new Error("Missing expiration in token");
       }
@@ -132,6 +137,7 @@ const verifyProxyToken = (
 
       return {
         sandboxId: payload.sandboxId,
+        userId: payload.userId,
         sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
         exp: payload.exp,
         iat: payload.iat,

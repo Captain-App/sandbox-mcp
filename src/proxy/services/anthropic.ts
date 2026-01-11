@@ -23,10 +23,25 @@ export const anthropic: ServiceConfig<Env> = {
   validate: (req) => req.headers.get("x-api-key"),
 
   transform: async (req, ctx) => {
-    if (!ctx.env.ANTHROPIC_API_KEY) {
-      return new Response("ANTHROPIC_API_KEY not configured", { status: 500 });
+    // 1. Fetch user config from shipbox-api via service binding
+    const res = await ctx.env.SHIPBOX_API.fetch(
+      `http://api/internal/user-config/${ctx.jwt.userId}`,
+    );
+
+    let apiKey = ctx.env.ANTHROPIC_API_KEY;
+
+    if (res.ok) {
+      const config = (await res.json()) as { anthropicKey: string | null };
+      if (config.anthropicKey) {
+        apiKey = config.anthropicKey;
+      }
     }
-    req.headers.set("x-api-key", ctx.env.ANTHROPIC_API_KEY);
+
+    if (!apiKey) {
+      return new Response("Anthropic API key not found", { status: 500 });
+    }
+
+    req.headers.set("x-api-key", apiKey);
     return req;
   },
 };

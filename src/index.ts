@@ -117,17 +117,18 @@ async function proxyToSandbox(
     normalizeId: true,
   });
 
+  // Get session metadata to know repository info and userId
+  const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
+
   // Create a short-lived proxy token for web UI access
   const proxyToken = await Effect.runPromise(
     createProxyToken({
       secret: env.PROXY_JWT_SECRET,
       sandboxId: sessionId,
+      userId: metadata?.userId || "unknown",
       expiresIn: "15m", // Short-lived for web UI sessions
     }),
   );
-
-  // Get session metadata to know repository info
-  const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
 
   // Derive base URL from request (no need for env var)
   const requestUrl = new URL(request.url);
@@ -222,7 +223,10 @@ const workerFetch = async (
         ? { url: body.repository, branch: body.branch ?? "main" }
         : undefined,
       title: body.name || body.title,
-      config: { defaultModel: body.model || "claude-sonnet-4-5" },
+      config: {
+        defaultModel: body.model || "claude-sonnet-4-5",
+        region: body.region || "lhr",
+      },
       clonedRepos: body.repository ? [body.repository] : [],
     };
 
