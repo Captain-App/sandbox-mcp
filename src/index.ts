@@ -186,6 +186,80 @@ export default {
       return OpenCodeMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
     }
 
+    // INTERNAL API for auth wrapper (cloud-box-castle-api)
+    // List all sessions
+    if (url.pathname === "/internal/sessions" && request.method === "GET") {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const storage = yield* SessionStorage;
+          return yield* storage.listSessions();
+        }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)))
+      );
+      return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
+    }
+
+    // Create session
+    if (url.pathname === "/internal/sessions" && request.method === "POST") {
+      const body = await request.json() as any;
+      const sessionId = (crypto.randomUUID().slice(0, 8)) as any;
+      const now = Date.now();
+      const session = {
+        sessionId,
+        sandboxId: sessionId,
+        createdAt: now,
+        lastActivity: now,
+        status: "active" as const,
+        workspacePath: "/workspace",
+        webUiUrl: `${url.protocol}//${url.host}/session/${sessionId}/`,
+        repository: body.repository ? { url: body.repository, branch: body.branch ?? "main" } : undefined,
+        title: body.name || body.title,
+        config: { defaultModel: body.model || "claude-sonnet-4-5" },
+        clonedRepos: body.repository ? [body.repository] : [],
+      };
+      
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const storage = yield* SessionStorage;
+          yield* storage.putSession(session);
+        }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)))
+      );
+      return new Response(JSON.stringify(session), { status: 201, headers: { "Content-Type": "application/json" } });
+    }
+
+    // Get/Delete/Start session
+    const internalMatch = url.pathname.match(/^\/internal\/sessions\/([0-9a-f]{8})(\/start)?$/);
+    if (internalMatch) {
+      const sessionId = internalMatch[1];
+      const isStart = !!internalMatch[2];
+
+      if (isStart && request.method === "POST") {
+        // Just waking it up - proxyToSandbox does this idempotently
+        await proxyToSandbox(request, env, sessionId, "/health");
+        return new Response(JSON.stringify({ success: true, status: "active" }), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (request.method === "GET") {
+        const session = await Effect.runPromise(
+          Effect.gen(function* () {
+            const storage = yield* SessionStorage;
+            return yield* storage.getSession(sessionId);
+          }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)))
+        );
+        if (session._tag === "None") return new Response("Not found", { status: 404 });
+        return new Response(JSON.stringify(session.value), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (request.method === "DELETE") {
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const storage = yield* SessionStorage;
+            yield* storage.deleteSession(sessionId);
+          }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)))
+        );
+        return new Response(JSON.stringify({ success: true }));
+      }
+    }
+
     // Web UI entry point - /session/{sessionId} sets cookie and redirects to OpenCode
     // OpenCode expects URLs like /{base64(directory)}/session/{opencode-session-id}
     // We query R2 to get the actual OpenCode session ID and workspace path
