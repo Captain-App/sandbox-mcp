@@ -377,14 +377,12 @@ const workerFetch = async (
   );
 };
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return withSentry(
-      (env: Env) => ({
-        dsn: env.SENTRY_DSN,
-        tracesSampleRate: 1.0,
-      }),
-      workerFetch,
-    )(request, env, ctx);
+export default withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    tracesSampleRate: 1.0,
+  }),
+  {
+    fetch: workerFetch,
   },
-};
+);
