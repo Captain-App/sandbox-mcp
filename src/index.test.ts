@@ -45,7 +45,7 @@ describe("Engine Internal API", () => {
       }),
     });
 
-    const res = await worker.fetch(req, env, {} as any);
+    const res = await (worker as any).fetch(req, env, {} as any);
     expect(res.status).toBe(201);
 
     const body = (await res.json()) as any;
