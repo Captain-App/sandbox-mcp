@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "sandbox-mcp",
+	"name": "shipbox-engine",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-05-06",
 	"compatibility_flags": ["nodejs_compat"],
@@ -46,7 +46,7 @@
 	"r2_buckets": [
 		{
 			"binding": "SESSIONS_BUCKET",
-			"bucket_name": "opencode-sessions"
+			"bucket_name": "shipbox-sessions"
 		}
 	],
 
