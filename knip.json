@@ -1,36 +1,3 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json",
-  "project": ["src/**/*.ts"],
-  "ignore": ["src/**/*.test.ts", "src/**/*.integration.test.ts"],
-  "includeEntryExports": true,
-  "ignoreDependencies": [
-    "cloudflare",
-    "@shipbox/shared",
-    "@cloudflare/vitest-pool-workers",
-    "@cloudflare/workers-types",
-    "concurrently",
-    "lefthook",
-    "oxfmt",
-    "oxlint",
-    "wrangler",
-    "ai"
-  ],
-  "ignoreBinaries": [
-    "lefthook",
-    "wrangler",
-    "concurrently",
-    "oxlint",
-    "oxfmt",
-    "tsc",
-    "knip"
-  ],
-  "rules": {
-    "classMembers": "error"
-  },
-  "wrangler": {
-    "config": ["wrangler.jsonc"]
-  },
-  "vitest": {
-    "entry": ["src/**/*.test.ts"]
-  }
+  "ignoreDependencies": ["@microlabs/otel-cf-workers"]
 }

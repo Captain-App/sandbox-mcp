@@ -5,8 +5,7 @@ import type { Config } from "@opencode-ai/sdk";
 import { Effect, Option, pipe } from "effect";
 import { withSentry as sentryWrapper } from "@sentry/cloudflare";
 import * as Sentry from "@sentry/cloudflare";
-// OTel instrumentation is disabled - see comment at end of file
-// import { instrument } from "@microlabs/otel-cf-workers";
+import { instrument } from "@microlabs/otel-cf-workers";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
 import { RealtimeChannel } from "./realtime";
@@ -128,6 +127,29 @@ function getSessionMetadata(
  *
  * All initialization is idempotent - safe to call on every request.
  */
+/**
+ * Helper to get sandbox with OTel-safe binding.
+ * OTel wraps bindings in a Proxy, which can cause "Illegal invocation"
+ * when passed to library functions like getSandbox().
+ */
+function getSafeSandbox(env: Env, sessionId: string) {
+  const { Sandbox } = env;
+  return getSandbox(
+    {
+      get: Sandbox.get.bind(Sandbox),
+      idFromName: Sandbox.idFromName.bind(Sandbox),
+      idFromString: Sandbox.idFromString.bind(Sandbox),
+      newUniqueId: Sandbox.newUniqueId.bind(Sandbox),
+    } as any,
+    sessionId,
+    { normalizeId: true },
+  );
+}
+
+/**
+ * Proxy request to a sandbox.
+ * Handles waking up the sandbox, balance checks, and proxying.
+ */
 async function proxyToSandbox(
   request: Request,
   env: Env,
@@ -136,9 +158,7 @@ async function proxyToSandbox(
   port?: number,
 ): Promise<Response> {
   // Get sandbox for this session (will wake it up if sleeping)
-  // Note: We pass env.Sandbox directly, not through intermediate object,
-  // to avoid "Illegal invocation" errors with DO bindings.
-  const sandbox = getSandbox(env.Sandbox, sessionId, { normalizeId: true });
+  const sandbox = getSafeSandbox(env, sessionId);
 
   // Get session metadata to know repository info and userId
   const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
@@ -270,7 +290,7 @@ const workerFetch = async (
     const targetPath = previewMatch[2] || "/";
     try {
       // Get sandbox stub for this session
-      const sandbox = getSandbox(env.Sandbox, sessionId, { normalizeId: true });
+      const sandbox = getSafeSandbox(env, sessionId);
 
       // Rewrite URL to the target path
       const rewrittenUrl = new URL(targetPath, url.origin);
@@ -577,7 +597,7 @@ const workerFetch = async (
       const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
       if (!metadata) return new Response("Session not found", { status: 404 });
 
-      const sandbox = getSandbox(env.Sandbox, sessionId, { normalizeId: true });
+      const sandbox = getSafeSandbox(env, sessionId);
 
       // Resolve path relative to workspace if not absolute
       const absolutePath = filePath.startsWith("/")
@@ -812,16 +832,24 @@ const workerFetch = async (
   );
 };
 
-// NOTE: OTel instrumentation is temporarily disabled because it wraps env in a Proxy
-// that breaks @cloudflare/sandbox's getSandbox() function, causing "Illegal invocation" errors.
-// TODO: Find a way to unwrap the env or use a different approach for tracing.
-// See: https://developers.cloudflare.com/workers/observability/errors/#illegal-invocation-errors
-export default sentryWrapper(
+export default instrument(
+  sentryWrapper(
+    (env: Env) => ({
+      dsn: env.SENTRY_DSN,
+      tracesSampleRate: 1.0,
+    }),
+    {
+      fetch: workerFetch,
+    },
+  ),
   (env: Env) => ({
-    dsn: env.SENTRY_DSN,
-    tracesSampleRate: 1.0,
+    exporter: {
+      url: "https://api.honeycomb.io/v1/traces",
+      headers: {
+        "x-honeycomb-team": env.HONEYCOMB_API_KEY || "",
+        "x-honeycomb-dataset": env.HONEYCOMB_DATASET || "shipbox-engine",
+      },
+    },
+    service: { name: "shipbox-engine" },
   }),
-  {
-    fetch: workerFetch,
-  },
 );

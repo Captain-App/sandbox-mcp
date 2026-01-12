@@ -202,11 +202,22 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
 /**
  * Get a sandbox instance from the binding.
  * IMPORTANT: Must be called fresh in each workflow step - DO stubs are NOT serializable.
+ * Uses a safe binding wrapper to avoid "Illegal invocation" errors with OTel Proxies.
  */
 export function getSandbox(deps: WorkflowDeps, sandboxId: string): Sandbox<unknown> {
-  return cfGetSandbox(deps.sandboxBinding, sandboxId, {
-    normalizeId: true,
-  });
+  const binding = deps.sandboxBinding;
+  return cfGetSandbox(
+    {
+      get: binding.get.bind(binding),
+      idFromName: binding.idFromName.bind(binding),
+      idFromString: binding.idFromString.bind(binding),
+      newUniqueId: binding.newUniqueId.bind(binding),
+    } as any,
+    sandboxId,
+    {
+      normalizeId: true,
+    },
+  );
 }
 
 /**
