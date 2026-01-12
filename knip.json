@@ -12,7 +12,8 @@
     "lefthook",
     "oxfmt",
     "oxlint",
-    "wrangler"
+    "wrangler",
+    "ai"
   ],
   "ignoreBinaries": [
     "lefthook",
