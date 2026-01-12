@@ -1,9 +1,7 @@
 import { Effect, Exit, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { RunStorageReadError } from "../models/errors";
-import type { RunRecord } from "../models/run";
-import { DEFAULT_MODEL } from "../models/session";
+import { RunStorageReadError, RunRecord, DEFAULT_MODEL } from "@shipbox/shared";
 import { createMockR2Bucket } from "../test-utils/r2-mock";
 import { makeRunStorageLayer, RunStorage } from "./run";
 

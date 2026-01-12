@@ -1,8 +1,7 @@
 import { Effect, Exit, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { SessionStorageReadError } from "../models/errors";
-import type { SessionId, SessionMetadata } from "../models/session";
+import { SessionStorageReadError, SessionId, SessionMetadata } from "@shipbox/shared";
 import { createMockR2Bucket } from "../test-utils/r2-mock";
 import { makeSessionStorageLayer, SessionStorage } from "./session";
 

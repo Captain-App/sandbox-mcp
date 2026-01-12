@@ -1,8 +1,7 @@
 // src/services/run.ts
 import { Context, Effect, Layer, Option, ParseResult, Schedule, Schema } from "effect";
 
-import { RunStorageReadError, RunStorageWriteError } from "../models/errors";
-import { RunRecord } from "../models/run";
+import { RunStorageReadError, RunStorageWriteError, RunRecord } from "@shipbox/shared";
 import { StorageKeys } from "../storage/keys";
 
 /**

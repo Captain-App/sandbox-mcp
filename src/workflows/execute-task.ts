@@ -1,7 +1,7 @@
 // src/workflows/execute-task.ts
 import { type WorkflowEvent, type WorkflowStep, WorkflowEntrypoint } from "cloudflare:workers";
 
-import type { RunRecord } from "../models/run";
+import type { RunRecord } from "@shipbox/shared";
 import { type WorkflowEvent as TelemetryEvent, WorkflowEventBuilder } from "../services/telemetry";
 import {
   Backup,
@@ -47,9 +47,10 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     const deps = this.getDeps();
 
     // Create telemetry event builder
-    // Constructor: (workflowId, runId, sessionId)
+    // Constructor: (workflowId, requestId, runId, sessionId)
     const telemetry = new WorkflowEventBuilder(
       event.instanceId, // workflowId - the workflow instance ID
+      params.requestId, // requestId - correlation ID from API
       params.runId, // runId - our run tracking ID
       params.sessionId, // sessionId
     );

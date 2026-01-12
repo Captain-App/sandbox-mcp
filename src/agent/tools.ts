@@ -1,8 +1,7 @@
 // src/agent/tools.ts
 import { z } from "zod";
 
-import { TASK_MAX_LENGTH } from "../models/run";
-import { DEFAULT_MODEL, GITHUB_URL_PREFIX } from "../models/session";
+import { TASK_MAX_LENGTH, DEFAULT_MODEL, GITHUB_URL_PREFIX } from "@shipbox/shared";
 
 /**
  * MCP tool schemas using Zod (required by MCP SDK)

@@ -126,6 +126,23 @@ export function createProxyHandler<TEnv = unknown>(
       // Verify the JWT token
       const jwt = await verifyProxyTokenAsync({ secret: jwtSecret(env), token });
 
+      // Check balance if this is a platform-charged service (like Anthropic)
+      if (service === "anthropic") {
+        const shipboxApi = (env as any).SHIPBOX_API as Fetcher | undefined;
+        if (shipboxApi) {
+          const balanceRes = await shipboxApi.fetch(
+            `http://api/internal/check-balance/${jwt.userId}`,
+          );
+          if (balanceRes.status === 402) {
+            const data = (await balanceRes.json()) as any;
+            return new Response(JSON.stringify({ error: data.error || "Insufficient balance" }), {
+              status: 402,
+              headers: { "Content-Type": "application/json" },
+            });
+          }
+        }
+      }
+
       // Build the target URL
       const targetUrl = buildTargetUrl(serviceConfig.target, path, url.search);
 
@@ -157,6 +174,54 @@ export function createProxyHandler<TEnv = unknown>(
 
       // Forward to target service
       const response = await fetch(result);
+
+      // Report usage if needed (e.g. for Anthropic token tracking)
+      if (service === "anthropic" && response.ok) {
+        const inputTokens = response.headers.get("anthropic-tokens-input");
+        const outputTokens = response.headers.get("anthropic-tokens-output");
+
+        if (inputTokens || outputTokens) {
+          // Report token usage to shipbox-api
+          // Note: We don't have ctx.waitUntil here, but we can fire and forget
+          // or we can pass a reporter in env if needed.
+          // For now, let's assume Env has SHIPBOX_API binding.
+          const shipboxApi = (env as any).SHIPBOX_API as Fetcher | undefined;
+          if (shipboxApi) {
+            const body = {
+              userId: jwt.userId,
+              sessionId: jwt.sessionId,
+              service: "anthropic",
+              inputTokens: parseInt(inputTokens || "0"),
+              outputTokens: parseInt(outputTokens || "0"),
+              model: response.headers.get("anthropic-model"),
+            };
+
+            // Report token usage to shipbox-api via service binding
+            shipboxApi
+              .fetch("http://api/internal/report-token-usage", {
+                method: "POST",
+                body: JSON.stringify(body),
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Request-Id": request.headers.get("X-Request-Id") || "",
+                },
+              })
+              .catch((err) => {
+                const requestId = request.headers.get("X-Request-Id");
+                globalThis.console.error(
+                  JSON.stringify({
+                    level: "error",
+                    message: "Failed to report token usage",
+                    error: err instanceof Error ? err.message : String(err),
+                    requestId,
+                    userId: jwt.userId,
+                    sessionId: jwt.sessionId,
+                  }),
+                );
+              });
+          }
+        }
+      }
 
       // Return response (preserve status, headers, body)
       return new Response(response.body, {

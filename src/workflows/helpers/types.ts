@@ -29,6 +29,10 @@ export interface TaskParams {
    */
   proxyBaseUrl: string;
   /**
+   * Request ID for correlation across services.
+   */
+  requestId: string;
+  /**
    * Existing OpenCode session ID for conversation continuation.
    * If provided, the workflow will continue the existing session.
    */

@@ -48,6 +48,7 @@ export interface WorkflowEvent {
   // Identifiers
   timestamp: string;
   workflowId: string;
+  requestId: string;
   runId: string;
   sessionId: string;
 
@@ -138,10 +139,11 @@ export class WorkflowEventBuilder {
   private event: WorkflowEvent;
   private startTime: number;
 
-  constructor(workflowId: string, runId: string, sessionId: string) {
+  constructor(workflowId: string, requestId: string, runId: string, sessionId: string) {
     this.startTime = Date.now();
     this.event = {
       workflowId,
+      requestId,
       runId,
       sessionId,
       timestamp: new Date().toISOString(),

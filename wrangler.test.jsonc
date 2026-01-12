@@ -1,16 +1,11 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "shipbox-engine",
+	"name": "shipbox-engine-test",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-05-06",
 	"compatibility_flags": ["nodejs_compat"],
 
-	"observability": {
-		"enabled": true
-	},
-
 	// Container configuration for Sandbox
-	// The Dockerfile extends cloudflare/sandbox with OpenCode installed
 	"containers": [
 		{
 			"class_name": "Sandbox",
@@ -42,35 +37,25 @@
 		}
 	],
 
-	// R2 bucket for session persistence (workspace files + OpenCode state)
+	// R2 bucket for session persistence
 	"r2_buckets": [
 		{
 			"binding": "SESSIONS_BUCKET",
-			"bucket_name": "shipbox-sessions"
+			"bucket_name": "shipbox-sessions-test"
 		}
 	],
 
-	// Workflows for long-running tasks
+	// Workflows
 	"workflows": [
 		{
-			"name": "execute-task-workflow",
+			"name": "execute-task-workflow-test",
 			"binding": "EXECUTE_TASK_WORKFLOW",
 			"class_name": "ExecuteTaskWorkflow"
 		}
 	],
 
-	// Environment variables
-	// Secrets (R2 creds, ANTHROPIC_API_KEY, GITHUB_TOKEN) via wrangler secret put
 	"vars": {
-		"ENVIRONMENT": "development",
-		"SENTRY_DSN": "https://ece4ae70382d63b992074b523d4b830a@o4508794945863680.ingest.de.sentry.io/4510694126977104",
-		"HONEYCOMB_DATASET": "shipbox-engine"
-	},
-
-	"services": [
-		{
-			"binding": "SHIPBOX_API",
-			"service": "shipbox-api"
-		}
-	]
+		"ENVIRONMENT": "test",
+		"PROXY_JWT_SECRET": "test-secret"
+	}
 }

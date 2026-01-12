@@ -6,6 +6,7 @@ import { Schema } from "effect";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Sentry from "@sentry/cloudflare";
 
 import {
   isRunStorageError,
@@ -13,8 +14,10 @@ import {
   isSessionStorageError,
   RunNotFoundError,
   SessionNotFoundError,
-} from "../models/errors";
-import { DEFAULT_MODEL, SessionId, type SessionMetadata } from "../models/session";
+  DEFAULT_MODEL,
+  SessionId,
+  type SessionMetadata,
+} from "@shipbox/shared";
 import { createProxyToken } from "../proxy";
 import { makeRunStorageLayer, RunStorage } from "../services/run";
 import { makeSessionStorageLayer, SessionStorage } from "../services/session";
@@ -167,28 +170,72 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
   /** Cached base URL, set during onConnect */
   private baseUrl: string | null = null;
 
+  /** Cached user ID, set during onConnect from X-User-Id header */
+  private userId: string | null = null;
+
+  /** Cached request ID, set during onConnect from X-Request-Id header */
+  private requestId: string | null = null;
+
   /**
-   * Called when a client connects. We capture the base URL from the request
-   * so we can use it later in tool handlers (which don't have request context).
+   * Called when a client connects. We capture the base URL and user ID
+   * from the request so we can use it later in tool handlers.
    */
   override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     // Extract and cache the base URL from the connection request
     const url = new URL(ctx.request.url);
     this.baseUrl = `${url.protocol}//${url.host}`;
 
+    // Extract user ID from header injected by shipbox-api
+    this.userId = ctx.request.headers.get("X-User-Id");
+
+    // Extract request ID from header injected by shipbox-api
+    this.requestId = ctx.request.headers.get("X-Request-Id");
+
+    // Set Sentry context
+    if (this.userId) {
+      Sentry.setUser({ id: this.userId });
+      Sentry.setTag("userId", this.userId);
+    }
+    if (this.requestId) {
+      Sentry.setTag("requestId", this.requestId);
+    }
+
+    Sentry.addBreadcrumb({
+      category: "mcp",
+      message: `Client connected: ${this.userId}`,
+      level: "info",
+    });
+
     // Call parent implementation
     return super.onConnect(connection, ctx);
   }
 
   /**
+   * Get the request ID for this connection.
+   */
+  private getRequestId(): string {
+    return this.requestId || "unknown";
+  }
+
+  /**
    * Get the base URL for this worker.
-   * Uses the URL captured during onConnect.
    */
   private getBaseUrl(): string {
     if (!this.baseUrl) {
       throw new Error("Base URL not available - onConnect must be called first");
     }
     return this.baseUrl;
+  }
+
+  /**
+   * Get the user ID for this connection.
+   */
+  private getUserId(): string {
+    if (!this.userId) {
+      // In development/local without proxy, default to "unknown"
+      return "unknown";
+    }
+    return this.userId;
   }
 
   /**
@@ -214,8 +261,14 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         inputSchema: runTaskInputSchema,
       },
       async (params: RunTaskInput) => {
-        const telemetry = new ToolCallEventBuilder("opencode_run_task", params.sessionId ?? "new");
+        const telemetry = new ToolCallEventBuilder("opencode_run_task", this.getRequestId());
         telemetry.startPhase("validate");
+
+        Sentry.addBreadcrumb({
+          category: "tool",
+          message: `opencode_run_task: ${params.sessionId || "new"}`,
+          data: { sessionId: params.sessionId, model: params.model },
+        });
 
         try {
           const rt = getRuntime(this.runtime);
@@ -310,6 +363,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             createProxyToken({
               secret: this.env.PROXY_JWT_SECRET,
               sandboxId: session.sandboxId,
+              userId: session.userId || this.getUserId(),
               sessionId: session.sessionId,
               expiresIn: "2h",
             }),
@@ -334,6 +388,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               existingOpencodeSessionId: session.opencodeSessionId,
               proxyToken,
               proxyBaseUrl: this.getBaseUrl(),
+              requestId: this.getRequestId(),
             },
           });
 
@@ -397,7 +452,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         inputSchema: getResultInputSchema,
       },
       async (params: GetResultInput) => {
-        const telemetry = new ToolCallEventBuilder("opencode_get_result", params.runId);
+        const telemetry = new ToolCallEventBuilder("opencode_get_result", this.getRequestId());
         telemetry.startPhase("storage");
 
         try {
@@ -474,7 +529,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         inputSchema: listRunsInputSchema,
       },
       async (params: ListRunsInput) => {
-        const telemetry = new ToolCallEventBuilder("opencode_list_runs", params.sessionId ?? "all");
+        const telemetry = new ToolCallEventBuilder("opencode_list_runs", this.getRequestId());
         telemetry.startPhase("storage");
 
         try {

@@ -2,7 +2,7 @@
 
 import * as Effect from "effect/Effect";
 
-import type { RunRecord } from "../../models/run";
+import type { RunRecord } from "@shipbox/shared";
 import { makeRunStorageLayer, RunStorage } from "../../services/run";
 import { makeSessionStorageLayer, SessionStorage } from "../../services/session";
 

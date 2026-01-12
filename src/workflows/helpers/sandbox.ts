@@ -14,6 +14,7 @@ interface SandboxReadyParams {
   bucket: R2Bucket;
   proxyBaseUrl: string;
   proxyToken: string;
+  userId?: string;
   repository?: {
     url: string;
     branch?: string;

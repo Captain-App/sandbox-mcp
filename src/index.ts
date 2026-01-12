@@ -4,9 +4,11 @@ import { createOpencodeServer } from "@cloudflare/sandbox/opencode";
 import type { Config } from "@opencode-ai/sdk";
 import { Effect, Option } from "effect";
 import { withSentry } from "@sentry/cloudflare";
+import * as Sentry from "@sentry/cloudflare";
+import { instrumentation } from "@microlabs/otel-cf-workers";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
-import type { SessionMetadata } from "./models/session";
+import type { SessionMetadata } from "@shipbox/shared";
 import { anthropic, createProxyHandler, createProxyToken, github, toContainerUrl } from "./proxy";
 import { makeSessionStorageLayer, SessionStorage } from "./services/session";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
@@ -58,6 +60,13 @@ function getProxyOpencodeConfig(proxyBaseUrl: string, proxyToken: string): Confi
  * and we need to know which sandbox to proxy those requests to.
  */
 const SESSION_COOKIE_NAME = "opencode_session_id";
+
+/**
+ * Get request ID from header
+ */
+function getRequestIdFromRequest(request: Request): string | null {
+  return request.headers.get("X-Request-Id");
+}
 
 /**
  * Get session ID from cookie
@@ -142,6 +151,7 @@ async function proxyToSandbox(
     proxyBaseUrl: baseUrl,
     proxyToken,
     repository: metadata?.repository,
+    userId: metadata?.userId,
   });
 
   // Start OpenCode server with proxy-based config and correct workspace path
@@ -174,6 +184,12 @@ const workerFetch = async (
   ctx: ExecutionContext,
 ): Promise<Response> => {
   const url = new URL(request.url);
+
+  // Set Sentry context
+  const requestId = getRequestIdFromRequest(request);
+  if (requestId) {
+    Sentry.setTag("requestId", requestId);
+  }
 
   // Health check
   if (url.pathname === "/health") {
@@ -355,7 +371,16 @@ const workerFetch = async (
 
       return response;
     } catch (error) {
-      console.error("API proxy error:", error);
+      const requestId = getRequestIdFromRequest(request);
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "API proxy error",
+          error: error instanceof Error ? error.message : String(error),
+          requestId,
+          sessionId,
+        }),
+      );
       return new Response(JSON.stringify({ error: "Failed to proxy request" }), {
         status: 500,
         headers: { "Content-Type": "application/json" },
@@ -381,12 +406,24 @@ const workerFetch = async (
   );
 };
 
-export default withSentry(
+export default instrumentation(
   (env: Env) => ({
-    dsn: env.SENTRY_DSN,
-    tracesSampleRate: 1.0,
+    exporter: {
+      url: "https://api.honeycomb.io/v1/traces",
+      headers: {
+        "x-honeycomb-team": env.HONEYCOMB_API_KEY || "",
+        "x-honeycomb-dataset": env.HONEYCOMB_DATASET || "shipbox-engine",
+      },
+    },
+    service: { name: "shipbox-engine" },
   }),
-  {
-    fetch: workerFetch,
-  },
+  withSentry(
+    (env: Env) => ({
+      dsn: env.SENTRY_DSN,
+      tracesSampleRate: 1.0,
+    }),
+    {
+      fetch: workerFetch,
+    },
+  ),
 );

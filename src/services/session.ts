@@ -1,8 +1,11 @@
 // src/services/session.ts
 import { Context, Effect, Layer, Option, ParseResult, Schedule, Schema } from "effect";
 
-import { SessionStorageReadError, SessionStorageWriteError } from "../models/errors";
-import { SessionMetadata } from "../models/session";
+import {
+  SessionStorageReadError,
+  SessionStorageWriteError,
+  SessionMetadata,
+} from "@shipbox/shared";
 import { StorageKeys } from "../storage/keys";
 
 /**
