@@ -2,7 +2,7 @@
 
 import * as Effect from "effect/Effect";
 
-import type { RunRecord } from "@shipbox/shared";
+import type { RunRecord, StepStatus } from "@shipbox/shared";
 import { makeRunStorageLayer, RunStorage } from "../../services/run";
 import { makeSessionStorageLayer, SessionStorage } from "../../services/session";
 
@@ -63,6 +63,31 @@ export async function completeRun(
       Effect.gen(function* () {
         const storage = yield* RunStorage;
         yield* storage.completeRun(runId, result);
+      }),
+      layer,
+    ),
+  );
+}
+
+/**
+ * Update the current step status of a run.
+ *
+ * Called from various workflow steps to provide live status updates.
+ */
+export async function updateRunStep(
+  bucket: R2Bucket,
+  runId: string,
+  stepName: string,
+  status: StepStatus,
+  durationMs?: number,
+  error?: string,
+): Promise<void> {
+  const layer = makeRunStorageLayer(bucket);
+  await Effect.runPromise(
+    Effect.provide(
+      Effect.gen(function* () {
+        const storage = yield* RunStorage;
+        yield* storage.updateRunStep(runId, stepName, status, durationMs, error);
       }),
       layer,
     ),

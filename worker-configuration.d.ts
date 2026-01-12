@@ -19,6 +19,7 @@ declare namespace Cloudflare {
 		SENTRY_DSN?: string;
 		HONEYCOMB_API_KEY?: string;
 		HONEYCOMB_DATASET?: string;
+		METRICS: AnalyticsEngineDataset;
 	}
 }
 interface Env extends Cloudflare.Env {}

@@ -23,6 +23,7 @@ vi.mock("./helpers", () => ({
     createRun: vi.fn(),
     completeRun: vi.fn(),
     updateSessionAfterRun: vi.fn(),
+    updateRunStep: vi.fn(),
   },
   OpenCode: {
     executeTask: vi.fn(),
@@ -35,7 +36,9 @@ vi.mock("./helpers", () => ({
     setMetadata = vi.fn();
     setOutcome = vi.fn();
     setError = vi.fn();
-    finalize = vi.fn().mockReturnValue({});
+    startPhase = vi.fn();
+    endPhase = vi.fn();
+    finalize = vi.fn().mockReturnValue({ phases: {} });
   },
 }));
 

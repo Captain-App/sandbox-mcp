@@ -1,8 +1,9 @@
 // src/workflows/execute-task.ts
 import { type WorkflowEvent, type WorkflowStep, WorkflowEntrypoint } from "cloudflare:workers";
 
-import type { RunRecord } from "@shipbox/shared";
+import type { RunRecord, StepStatus } from "@shipbox/shared";
 import * as Sentry from "@sentry/cloudflare";
+import { getErrorCategory } from "@shipbox/shared";
 import { type WorkflowEvent as TelemetryEvent, WorkflowEventBuilder } from "../services/telemetry";
 import {
   Backup,
@@ -56,6 +57,33 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     };
   }
 
+  /**
+   * Update the status of a specific workflow step in R2.
+   */
+  private async updateStep(
+    runId: string,
+    stepName: string,
+    status: StepStatus,
+    durationMs?: number,
+    error?: string,
+  ) {
+    try {
+      await Run.updateRunStep(this.env.SESSIONS_BUCKET, runId, stepName, status, durationMs, error);
+
+      // Write to Analytics Engine if duration is provided (step completed or failed)
+      if (durationMs !== undefined && this.env.METRICS) {
+        this.env.METRICS.writeDataPoint({
+          blobs: [stepName, status, this.env.ENVIRONMENT || "production"],
+          doubles: [durationMs],
+          indexes: [runId], // Use runId as index for correlation
+        });
+      }
+    } catch (err) {
+      // Don't fail the workflow if status update fails
+      console.error(`Failed to update step status for ${stepName}: ${err}`);
+    }
+  }
+
   async run(event: WorkflowEvent<TaskParams>, step: WorkflowStep): Promise<TaskResult> {
     const params = event.payload;
     const deps = this.getDeps();
@@ -71,8 +99,13 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       params.sessionId, // sessionId
     );
 
+    let currentPhase = "initialization";
+
     try {
       // Step 0: Pre-flight balance check
+      currentPhase = "check-balance";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       await step.do("check-balance", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "check-balance");
@@ -92,8 +125,18 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           return { ok: true };
         });
       });
+      telemetry.endPhase("check-balance");
+      await this.updateStep(
+        params.runId,
+        "check-balance",
+        "completed",
+        telemetry.finalize().phases?.["check-balance"],
+      );
 
       // Step 1: Create run record in R2 (doesn't need sandbox)
+      currentPhase = "create-run";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       await step.do("create-run", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "create-run");
@@ -116,9 +159,19 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           return { created: true };
         });
       });
+      telemetry.endPhase("create-run");
+      await this.updateStep(
+        params.runId,
+        "create-run",
+        "completed",
+        telemetry.finalize().phases?.["create-run"],
+      );
 
       // Step 2: Ensure sandbox is ready (restore backup, clone repo, configure proxy)
       // This is idempotent - safe to retry if workflow step fails
+      currentPhase = "ensure-sandbox-ready";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       const sandboxResult = await step.do("ensure-sandbox-ready", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "ensure-sandbox-ready");
@@ -142,11 +195,21 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           return result;
         });
       });
+      telemetry.endPhase("ensure-sandbox-ready");
+      await this.updateStep(
+        params.runId,
+        "ensure-sandbox-ready",
+        "completed",
+        telemetry.finalize().phases?.["ensure-sandbox-ready"],
+      );
       telemetry.setMetadata({ sessionRestored: sandboxResult.restoredBackup });
 
       const workingDirectory = sandboxResult.workspacePath;
 
       // Step 2.5: Update session with workspace path immediately for web UI access
+      currentPhase = "update-workspace-path";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       await step.do("update-workspace-path", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "update-workspace-path");
@@ -162,8 +225,18 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           return { updated: true };
         });
       });
+      telemetry.endPhase("update-workspace-path");
+      await this.updateStep(
+        params.runId,
+        "update-workspace-path",
+        "completed",
+        telemetry.finalize().phases?.["update-workspace-path"],
+      );
 
       // Step 3: Start OpenCode and execute task
+      currentPhase = "execute-opencode-task";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       const executeResult = await step.do(
         "execute-opencode-task",
         {
@@ -188,8 +261,18 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           });
         },
       );
+      telemetry.endPhase("execute-opencode-task");
+      await this.updateStep(
+        params.runId,
+        "execute-opencode-task",
+        "completed",
+        telemetry.finalize().phases?.["execute-opencode-task"],
+      );
 
       // Step 4: Get session title (auto-generated by OpenCode)
+      currentPhase = "get-session-title";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       const title = await step.do("get-session-title", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "get-session-title");
@@ -208,8 +291,18 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           );
         });
       });
+      telemetry.endPhase("get-session-title");
+      await this.updateStep(
+        params.runId,
+        "get-session-title",
+        "completed",
+        telemetry.finalize().phases?.["get-session-title"],
+      );
 
       // Step 5: Backup session state to R2
+      currentPhase = "backup-session";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       await step.do("backup-session", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "backup-session");
@@ -223,6 +316,13 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           return { backedUp: true };
         });
       });
+      telemetry.endPhase("backup-session");
+      await this.updateStep(
+        params.runId,
+        "backup-session",
+        "completed",
+        telemetry.finalize().phases?.["backup-session"],
+      );
 
       const result: TaskResult = {
         success: executeResult.result.success,
@@ -235,6 +335,9 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       };
 
       // Step 6: Complete run and update session in R2
+      currentPhase = "complete-run";
+      telemetry.startPhase(currentPhase);
+      await this.updateStep(params.runId, currentPhase, "running");
       await step.do("complete-run", async () => {
         return await Sentry.withScope(async (scope) => {
           scope.setTag("step", "complete-run");
@@ -255,6 +358,13 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           return { completed: true };
         });
       });
+      telemetry.endPhase("complete-run");
+      await this.updateStep(
+        params.runId,
+        "complete-run",
+        "completed",
+        telemetry.finalize().phases?.["complete-run"],
+      );
 
       // Emit success telemetry
       telemetry.setOutcome("success");
@@ -262,21 +372,29 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
       return result;
     } catch (error) {
+      const category = getErrorCategory(error);
+
       // Record error in Sentry
       Sentry.captureException(error, {
+        tags: { category },
         extra: { workflowId: event.instanceId, runId: params.runId, sessionId: params.sessionId },
       });
 
       // Record error in telemetry
       const errorName = error instanceof Error ? error.name : "UnknownError";
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Update the failing step status in R2
+      await this.updateStep(params.runId, currentPhase, "failed", undefined, errorMessage);
+
       telemetry.setError({
         type: errorName,
         code: errorName,
         message: errorMessage,
-        phase: "execution",
-        retriable: true,
+        phase: currentPhase,
+        retriable: category.startsWith("system"),
       });
+      telemetry.setMetadata({ category });
       this.emitTelemetry(telemetry.finalize());
 
       // Handle errors and still complete the run

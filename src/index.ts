@@ -9,8 +9,16 @@ import { instrument } from "@microlabs/otel-cf-workers";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
 import type { SessionMetadata } from "@shipbox/shared";
-import { anthropic, createProxyHandler, createProxyToken, github, toContainerUrl } from "./proxy";
+import {
+  anthropic,
+  cloudflare,
+  createProxyHandler,
+  createProxyToken,
+  github,
+  toContainerUrl,
+} from "./proxy";
 import { makeSessionStorageLayer, SessionStorage } from "./services/session";
+import { makeRunStorageLayer, RunStorage } from "./services/run";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 import { ensureSandboxReady } from "./workflows/helpers/sandbox";
 import { withRequestContext, withSentry, LoggerLayer } from "@shipbox/shared";
@@ -32,7 +40,7 @@ export { ExecuteTaskWorkflow };
 const proxyHandler = createProxyHandler<Env>({
   mountPath: "/proxy",
   jwtSecret: (env) => env.PROXY_JWT_SECRET,
-  services: { anthropic, github },
+  services: { anthropic, github, cloudflare },
 });
 
 /**
@@ -121,6 +129,7 @@ async function proxyToSandbox(
   env: Env,
   sessionId: string,
   targetPath: string,
+  port?: number,
 ): Promise<Response> {
   // Get sandbox for this session (will wake it up if sleeping)
   const sandbox = getSandbox(env.Sandbox, sessionId, {
@@ -169,11 +178,15 @@ async function proxyToSandbox(
     userId: metadata?.userId,
   });
 
-  // Start OpenCode server with proxy-based config and correct workspace path
-  const server = await createOpencodeServer(sandbox, {
-    directory: ready.workspacePath,
-    config: getProxyOpencodeConfig(baseUrl, proxyToken),
-  });
+  let fetchPort = port;
+  if (!fetchPort) {
+    // Start OpenCode server with proxy-based config and correct workspace path
+    const server = await createOpencodeServer(sandbox, {
+      directory: ready.workspacePath,
+      config: getProxyOpencodeConfig(baseUrl, proxyToken),
+    });
+    fetchPort = server.port;
+  }
 
   // Rewrite URL to the target path - OpenCode expects requests at root
   const url = new URL(request.url);
@@ -189,7 +202,7 @@ async function proxyToSandbox(
   });
 
   // Proxy directly to container
-  return sandbox.containerFetch(rewrittenRequest, server.port);
+  return sandbox.containerFetch(rewrittenRequest, fetchPort);
 }
 
 // Worker fetch handler
@@ -220,6 +233,14 @@ const workerFetch = async (
   // MCP endpoint - route to McpAgent
   if (url.pathname.startsWith("/mcp")) {
     return OpenCodeMcpAgent.serve("/mcp", { binding: "MCP_AGENT" }).fetch(request, env, ctx);
+  }
+
+  // Preview route - proxy to miniflare inside sandbox
+  const previewMatch = url.pathname.match(/^\/preview\/([0-9a-f]{8})(\/.*)?$/);
+  if (previewMatch) {
+    const sessionId = previewMatch[1];
+    const targetPath = previewMatch[2] || "/";
+    return proxyToSandbox(request, env, sessionId, targetPath, 8787);
   }
 
   // INTERNAL API for auth wrapper (cloud-box-castle-api)
@@ -341,6 +362,52 @@ const workerFetch = async (
       );
       return new Response(JSON.stringify({ success: true }));
     }
+  }
+
+  // Get run status
+  const runMatch = url.pathname.match(/^\/internal\/runs\/([a-z0-9-]+)$/);
+  if (runMatch && request.method === "GET") {
+    const runId = runMatch[1];
+    const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();
+    const result = await Effect.runPromise(
+      pipe(
+        Effect.gen(function* () {
+          const storage = yield* RunStorage;
+          return yield* storage.getRun(runId);
+        }),
+        Effect.provide(makeRunStorageLayer(env.SESSIONS_BUCKET)),
+        withRequestContext(requestId),
+        withSentry(Sentry as any),
+        Effect.provide(LoggerLayer),
+      ),
+    );
+    if (result._tag === "None") return new Response("Not found", { status: 404 });
+    return new Response(JSON.stringify(result.value), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Get session logs
+  const logsMatch = url.pathname.match(/^\/internal\/sessions\/([0-9a-f]{8})\/logs$/);
+  if (logsMatch && request.method === "GET") {
+    const sessionId = logsMatch[1];
+    const prefix = `command-logs/${sessionId}/`;
+    const objects = await env.SESSIONS_BUCKET.list({ prefix });
+
+    // Sort by key (contains timestamp) descending and take top 50
+    const sortedKeys = objects.objects.sort((a, b) => b.key.localeCompare(a.key)).slice(0, 50);
+
+    // Fetch log contents
+    const logs = await Promise.all(
+      sortedKeys.map(async (obj) => {
+        const entry = await env.SESSIONS_BUCKET.get(obj.key);
+        return entry ? entry.json() : null;
+      }),
+    );
+
+    return new Response(JSON.stringify(logs.filter(Boolean)), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // Web UI entry point - /session/{sessionId} sets cookie and redirects to OpenCode

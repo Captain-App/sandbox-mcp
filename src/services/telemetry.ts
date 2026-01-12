@@ -58,6 +58,7 @@ export interface WorkflowEvent {
 
   // Timing
   durationMs?: number;
+  phases?: Record<string, number>; // phase name -> duration in ms
 
   // Outcome
   outcome: "success" | "error" | "timeout";
@@ -138,6 +139,7 @@ export class ToolCallEventBuilder {
 export class WorkflowEventBuilder {
   private event: WorkflowEvent;
   private startTime: number;
+  private phaseTimers: Map<string, number> = new Map();
 
   constructor(workflowId: string, requestId: string, runId: string, sessionId: string) {
     this.startTime = Date.now();
@@ -166,6 +168,21 @@ export class WorkflowEventBuilder {
 
   setMetadata(metadata: Record<string, unknown>): this {
     this.event.metadata = { ...this.event.metadata, ...metadata };
+    return this;
+  }
+
+  startPhase(name: string): this {
+    this.phaseTimers.set(name, Date.now());
+    return this;
+  }
+
+  endPhase(name: string): this {
+    const start = this.phaseTimers.get(name);
+    if (start) {
+      const duration = Date.now() - start;
+      this.event.phases = { ...this.event.phases, [name]: duration };
+      this.phaseTimers.delete(name);
+    }
     return this;
   }
 

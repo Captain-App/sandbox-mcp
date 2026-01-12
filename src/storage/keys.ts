@@ -21,4 +21,8 @@ export const StorageKeys = {
 
   /** Run data: runs/{runId}.json */
   run: (runId: string) => `runs/${runId}.json`,
+
+  /** Command logs: command-logs/{sessionId}/{timestamp}-{command-hash}.json */
+  commandLog: (sessionId: string, timestamp: number, commandHash: string) =>
+    `command-logs/${sessionId}/${timestamp}-${commandHash}.json`,
 } as const;

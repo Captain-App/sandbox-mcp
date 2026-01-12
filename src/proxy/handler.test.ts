@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createProxyHandler } from "./handler";
 import * as Token from "./token";
-import { ProxyPathInvalidError } from "./errors";
 
 // Mock verifyProxyTokenAsync
 vi.mock("./token", () => ({

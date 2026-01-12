@@ -24,6 +24,19 @@ vi.mock("../proxy", () => ({
   createProxyToken: vi.fn(),
 }));
 
+// Mock helpers
+vi.mock("../workflows/helpers", () => ({
+  Miniflare: {
+    startMiniflare: vi.fn(),
+  },
+  Deploy: {
+    deployWorker: vi.fn(),
+  },
+  Sandbox: {
+    getSandbox: vi.fn().mockReturnValue({}),
+  },
+}));
+
 import { OpenCodeMcpAgent } from "./mcp-agent";
 import * as Proxy from "../proxy";
 import { Effect, Option, Exit } from "effect";
@@ -56,12 +69,14 @@ describe("OpenCodeMcpAgent", () => {
     } as any;
   });
 
-  it("should register 3 tools on init", () => {
-    expect(agent.server.registerTool).toHaveBeenCalledTimes(3);
+  it("should register tools on init", () => {
+    expect(agent.server.registerTool).toHaveBeenCalledTimes(5);
     const tools = agent.server.registerTool.mock.calls.map((c: any) => c[0]);
     expect(tools).toContain("opencode_run_task");
     expect(tools).toContain("opencode_get_result");
     expect(tools).toContain("opencode_list_runs");
+    expect(tools).toContain("opencode_preview_worker");
+    expect(tools).toContain("opencode_deploy_worker");
   });
 
   describe("opencode_run_task", () => {

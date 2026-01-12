@@ -25,16 +25,27 @@ vi.mock("./backup", () => ({
   restoreSession: vi.fn(),
 }));
 
+vi.mock("../../storage/keys", () => ({
+  StorageKeys: {
+    commandLog: vi.fn().mockReturnValue("command-log-key"),
+  },
+}));
+
 describe("Sandbox Helper: ensureSandboxReady", () => {
   const mockSandbox = {
     exec: vi.fn(),
     gitCheckout: vi.fn(),
   };
 
+  const mockBucket = {
+    put: vi.fn().mockResolvedValue(null),
+    get: vi.fn(),
+  };
+
   const params = {
     sandbox: mockSandbox as any,
     sessionId: "sess-123",
-    bucket: {} as any,
+    bucket: mockBucket as any,
     proxyBaseUrl: "https://worker.dev",
     proxyToken: "jwt-123",
     repository: { url: "https://github.com/owner/repo", branch: "main" },

@@ -76,6 +76,28 @@ export const listRunsInputSchema = z.object({
 export type ListRunsInput = z.infer<typeof listRunsInputSchema>;
 
 /**
+ * Schema for preview_worker tool input
+ */
+export const previewWorkerInputSchema = z.object({
+  sessionId: z.string().optional().describe("Session ID to run preview in."),
+  workerPath: z
+    .string()
+    .describe("Path to worker entry file (e.g., /workspace/my-worker/src/index.ts)"),
+  port: z.number().int().optional().default(8787).describe("Port for miniflare dev server."),
+});
+export type PreviewWorkerInput = z.infer<typeof previewWorkerInputSchema>;
+
+/**
+ * Schema for deploy_worker tool input
+ */
+export const deployWorkerInputSchema = z.object({
+  sessionId: z.string().optional().describe("Session ID to deploy from."),
+  workerPath: z.string().describe("Path to worker entry file."),
+  name: z.string().optional().describe("Optional worker name (defaults to session-based)."),
+});
+export type DeployWorkerInput = z.infer<typeof deployWorkerInputSchema>;
+
+/**
  * MCP tool response type - uses index signature for SDK compatibility
  */
 interface ToolResponse {

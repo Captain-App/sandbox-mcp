@@ -1,7 +1,7 @@
 // src/services/run.ts
 import { Context, Effect, Layer, Option, ParseResult, Schedule, Schema } from "effect";
 
-import { RunStorageReadError, RunStorageWriteError, RunRecord } from "@shipbox/shared";
+import { RunStorageReadError, RunStorageWriteError, RunRecord, StepStatus } from "@shipbox/shared";
 import { StorageKeys } from "../storage/keys";
 
 /**
@@ -124,6 +124,17 @@ interface RunStorageService {
   readonly completeRun: (
     runId: string,
     result: CompleteRunResult,
+  ) => Effect.Effect<void, RunStorageWriteError | RunStorageReadError>;
+
+  /**
+   * Update the current step and phase status of a run.
+   */
+  readonly updateRunStep: (
+    runId: string,
+    stepName: string,
+    status: StepStatus,
+    durationMs?: number,
+    error?: string,
   ) => Effect.Effect<void, RunStorageWriteError | RunStorageReadError>;
 
   /**
@@ -428,6 +439,94 @@ function makeRunStorageService(bucket: R2Bucket): RunStorageService {
         };
 
         // Write updated run
+        yield* Effect.tryPromise({
+          try: () =>
+            bucket.put(key, JSON.stringify(updatedRun), {
+              httpMetadata: { contentType: "application/json" },
+            }),
+          catch: (error) =>
+            new RunStorageWriteError({
+              runId,
+              cause: error instanceof Error ? error.message : String(error),
+            }),
+        });
+
+        // Update the global index with retry on concurrent modification
+        yield* Effect.retry(
+          Effect.gen(function* () {
+            const { index, etag } = yield* readIndex(bucket);
+
+            const updatedIndex: RunIndex = {
+              ...index,
+              runs: {
+                ...index.runs,
+                [runId]: toIndexEntry(updatedRun),
+              },
+              updatedAt: Date.now(),
+            };
+
+            yield* writeIndex(bucket, updatedIndex, etag);
+          }),
+          Schedule.intersect(
+            Schedule.recurs(MAX_INDEX_RETRIES),
+            Schedule.exponential(RETRY_BASE_DELAY, 2),
+          ),
+        );
+      }),
+
+    updateRunStep: (runId, stepName, status, durationMs, error) =>
+      Effect.gen(function* () {
+        const key = StorageKeys.run(runId);
+        const object = yield* Effect.tryPromise({
+          try: () => bucket.get(key),
+          catch: (error) =>
+            new RunStorageReadError({
+              runId,
+              cause: `R2 get failed: ${error instanceof Error ? error.message : String(error)}`,
+            }),
+        });
+
+        if (!object) {
+          return yield* Effect.fail(
+            new RunStorageReadError({
+              runId,
+              cause: "Run not found",
+            }),
+          );
+        }
+
+        const json = yield* Effect.tryPromise({
+          try: () => object.json<unknown>(),
+          catch: (error) =>
+            new RunStorageReadError({
+              runId,
+              cause: `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+            }),
+        });
+
+        const existingRun = yield* Schema.decodeUnknown(RunRecord)(json).pipe(
+          Effect.mapError(
+            (parseError) =>
+              new RunStorageReadError({
+                runId,
+                cause: `Schema validation failed: ${formatParseError(parseError)}`,
+              }),
+          ),
+        );
+
+        const phases = { ...existingRun.phases };
+        phases[stepName] = {
+          status,
+          durationMs: durationMs ?? phases[stepName]?.durationMs,
+          error: error ?? phases[stepName]?.error,
+        };
+
+        const updatedRun: typeof RunRecord.Type = {
+          ...existingRun,
+          currentStep: status === "running" ? stepName : existingRun.currentStep,
+          phases,
+        };
+
         yield* Effect.tryPromise({
           try: () =>
             bucket.put(key, JSON.stringify(updatedRun), {

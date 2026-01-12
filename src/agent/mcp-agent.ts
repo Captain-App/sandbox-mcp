@@ -27,14 +27,19 @@ import { createProxyToken } from "../proxy";
 import { makeRunStorageLayer, RunStorage } from "../services/run";
 import { makeSessionStorageLayer, SessionStorage } from "../services/session";
 import { ToolCallEventBuilder } from "../services/telemetry";
+import { Miniflare, Deploy, Sandbox as SandboxHelper } from "../workflows/helpers";
 import {
   formatErrorResponse,
   formatToolResponse,
   getResultInputSchema,
   listRunsInputSchema,
+  previewWorkerInputSchema,
+  deployWorkerInputSchema,
   runTaskInputSchema,
   type GetResultInput,
   type ListRunsInput,
+  type PreviewWorkerInput,
+  type DeployWorkerInput,
   type RunTaskInput,
 } from "./tools";
 
@@ -152,6 +157,8 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     this.registerRunTaskTool();
     this.registerGetResultTool();
     this.registerListRunsTool();
+    this.registerPreviewWorkerTool();
+    this.registerDeployWorkerTool();
 
     this.setState({ initialized: true });
   }
@@ -612,6 +619,212 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         } catch (error) {
           Sentry.captureException(error, {
             extra: { params, tool: "opencode_list_runs" },
+          });
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
+          return formatDomainError(error);
+        }
+      },
+    );
+  }
+
+  /**
+   * Tool: opencode_preview_worker
+   * Start miniflare inside the sandbox to preview a worker.
+   */
+  private registerPreviewWorkerTool(): void {
+    this.server.registerTool(
+      "opencode_preview_worker",
+      {
+        description:
+          "Start a miniflare development server inside the sandbox to preview a worker. Returns a preview URL that can be used to test the worker in real-time.",
+        inputSchema: previewWorkerInputSchema,
+      },
+      async (params: PreviewWorkerInput) => {
+        const telemetry = new ToolCallEventBuilder("opencode_preview_worker", this.getRequestId());
+        telemetry.startPhase("validate");
+
+        if (!params.sessionId) {
+          return formatErrorResponse({
+            code: "MISSING_SESSION_ID",
+            message: "sessionId is required for preview_worker.",
+          });
+        }
+
+        try {
+          const rt = getRuntime(this.runtime);
+
+          // 1. Get session to verify it exists
+          const sessionResult = await rt.runPromiseExit(
+            pipe(
+              Effect.gen(function* () {
+                const sessionStorage = yield* SessionStorage;
+                return yield* sessionStorage.getSession(params.sessionId!);
+              }),
+              withRequestContext(this.getRequestId(), this.userId || undefined, params.sessionId),
+            ),
+          );
+
+          if (sessionResult._tag === "Failure" || sessionResult.value._tag === "None") {
+            return formatErrorResponse({
+              code: "SESSION_NOT_FOUND",
+              message: `Session ${params.sessionId} not found.`,
+            });
+          }
+
+          const session = sessionResult.value.value;
+
+          telemetry.endPhase("validate");
+          telemetry.startPhase("sandbox");
+
+          // 2. Get sandbox and start miniflare
+          const sandbox = SandboxHelper.getSandbox(
+            { sandboxBinding: this.env.Sandbox, sessionsBucket: this.env.SESSIONS_BUCKET },
+            session.sandboxId,
+          );
+
+          const port = params.port ?? 8787;
+          const result = await Miniflare.startMiniflare(sandbox, params.workerPath, port);
+
+          telemetry.endPhase("sandbox");
+
+          const previewUrl = `${this.getBaseUrl()}/preview/${session.sessionId}${
+            port === 8787 ? "" : `:${port}`
+          }/`;
+
+          this.emitToolTelemetry(telemetry, true);
+
+          return formatToolResponse({
+            success: result.success,
+            previewUrl,
+            port: result.port,
+            logPath: result.logPath,
+          });
+        } catch (error) {
+          Sentry.captureException(error, {
+            extra: { params, tool: "opencode_preview_worker" },
+          });
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
+          return formatDomainError(error);
+        }
+      },
+    );
+  }
+
+  /**
+   * Tool: opencode_deploy_worker
+   * Bundle and deploy a worker to Workers for Platforms.
+   */
+  private registerDeployWorkerTool(): void {
+    this.server.registerTool(
+      "opencode_deploy_worker",
+      {
+        description:
+          "Bundle and deploy a worker to the production preview environment (Workers for Platforms). Returns the production URL for the deployed worker.",
+        inputSchema: deployWorkerInputSchema,
+      },
+      async (params: DeployWorkerInput) => {
+        const telemetry = new ToolCallEventBuilder("opencode_deploy_worker", this.getRequestId());
+        telemetry.startPhase("validate");
+
+        if (!params.sessionId) {
+          return formatErrorResponse({
+            code: "MISSING_SESSION_ID",
+            message: "sessionId is required for deploy_worker.",
+          });
+        }
+
+        try {
+          const rt = getRuntime(this.runtime);
+
+          // 1. Get session to verify it exists
+          const sessionResult = await rt.runPromiseExit(
+            pipe(
+              Effect.gen(function* () {
+                const sessionStorage = yield* SessionStorage;
+                return yield* sessionStorage.getSession(params.sessionId!);
+              }),
+              withRequestContext(this.getRequestId(), this.userId || undefined, params.sessionId),
+            ),
+          );
+
+          if (sessionResult._tag === "Failure" || sessionResult.value._tag === "None") {
+            return formatErrorResponse({
+              code: "SESSION_NOT_FOUND",
+              message: `Session ${params.sessionId} not found.`,
+            });
+          }
+
+          const session = sessionResult.value.value;
+
+          telemetry.endPhase("validate");
+          telemetry.startPhase("deploy");
+
+          // 2. Get sandbox and deploy
+          const sandbox = SandboxHelper.getSandbox(
+            { sandboxBinding: this.env.Sandbox, sessionsBucket: this.env.SESSIONS_BUCKET },
+            session.sandboxId,
+          );
+
+          // Get proxy token for sandbox-to-engine API calls if needed
+          const proxyToken = await rt.runPromise(
+            createProxyToken({
+              secret: this.env.PROXY_JWT_SECRET,
+              sandboxId: session.sandboxId,
+              userId: session.userId || this.getUserId(),
+              sessionId: session.sessionId,
+              expiresIn: "1h",
+            }),
+          );
+
+          const result = await Deploy.deployWorker({
+            sandbox,
+            sessionId: session.sessionId,
+            workerPath: params.workerPath,
+            name: params.name,
+            accountId: (this.env as any).CLOUDFLARE_ACCOUNT_ID,
+            apiToken: (this.env as any).CLOUDFLARE_API_TOKEN,
+            dispatchNamespace:
+              (this.env as any).CLOUDFLARE_DISPATCH_NAMESPACE || "sandbox-preview-workers",
+            proxyBaseUrl: this.getBaseUrl(),
+            proxyToken,
+          });
+
+          telemetry.endPhase("deploy");
+
+          if (!result.success) {
+            this.emitToolTelemetry(telemetry, false);
+            return formatErrorResponse({
+              code: "DEPLOYMENT_FAILED",
+              message: result.error || "Unknown deployment error",
+            });
+          }
+
+          this.emitToolTelemetry(telemetry, true);
+
+          return formatToolResponse({
+            success: true,
+            workerName: result.workerName,
+            url: result.url,
+          });
+        } catch (error) {
+          Sentry.captureException(error, {
+            extra: { params, tool: "opencode_deploy_worker" },
           });
           const errorName = error instanceof Error ? error.name : "UnknownError";
           const errorMessage = error instanceof Error ? error.message : String(error);

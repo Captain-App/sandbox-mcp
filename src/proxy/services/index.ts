@@ -4,3 +4,4 @@
 
 export { anthropic, configureAnthropic } from "./anthropic";
 export { configureGithub, github } from "./github";
+export { cloudflare } from "./cloudflare";
