@@ -33,13 +33,9 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
   /**
    * Initialize Sentry for the workflow instance
    */
-  private initSentry(params: TaskParams) {
+  private initSentry(params: TaskParams, instanceId: string) {
     if (this.env.SENTRY_DSN) {
-      Sentry.init({
-        dsn: this.env.SENTRY_DSN,
-        tracesSampleRate: 1.0,
-      });
-      Sentry.setTag("workflowId", this.instanceId);
+      Sentry.setTag("workflowId", instanceId);
       Sentry.setTag("requestId", params.requestId);
       Sentry.setTag("runId", params.runId);
       Sentry.setTag("sessionId", params.sessionId);
@@ -64,7 +60,7 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     const params = event.payload;
     const deps = this.getDeps();
 
-    this.initSentry(params);
+    this.initSentry(params, event.instanceId);
 
     // Create telemetry event builder
     // Constructor: (workflowId, requestId, runId, sessionId)
