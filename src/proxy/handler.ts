@@ -208,7 +208,7 @@ export function createProxyHandler<TEnv = unknown>(
               })
               .catch((err) => {
                 const requestId = request.headers.get("X-Request-Id");
-                globalThis.console.error(
+                console.error(
                   JSON.stringify({
                     level: "error",
                     message: "Failed to report token usage",

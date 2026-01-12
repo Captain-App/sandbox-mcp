@@ -59,9 +59,8 @@ describe("Backup Helper", () => {
       mockSandbox.readFileStream.mockResolvedValue(mockStream);
       vi.mocked(collectFile).mockResolvedValue({
         content: new Uint8Array([4, 5, 6]),
-        type: "file",
-        size: 3,
-      });
+        metadata: { size: 3 },
+      } as any);
 
       await backupSession(mockSandbox as any, sessionId, mockBucket as any);
 

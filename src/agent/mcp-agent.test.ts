@@ -46,7 +46,8 @@ describe("OpenCodeMcpAgent", () => {
       },
     };
 
-    agent = new OpenCodeMcpAgent(mockEnv, { initialized: false });
+    // Create agent by casting to any to avoid constructor signature issues
+    agent = new (OpenCodeMcpAgent as any)(mockEnv, { initialized: false });
 
     // Manually trigger init to register tools
     agent.init();

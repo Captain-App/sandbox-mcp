@@ -5,7 +5,7 @@ import type { Config } from "@opencode-ai/sdk";
 import { Effect, Option } from "effect";
 import { withSentry } from "@sentry/cloudflare";
 import * as Sentry from "@sentry/cloudflare";
-import { instrumentation } from "@microlabs/otel-cf-workers";
+import { instrument } from "@microlabs/otel-cf-workers";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
 import type { SessionMetadata } from "@shipbox/shared";
@@ -406,7 +406,16 @@ const workerFetch = async (
   );
 };
 
-export default instrumentation(
+export default instrument(
+  withSentry(
+    (env: Env) => ({
+      dsn: env.SENTRY_DSN,
+      tracesSampleRate: 1.0,
+    }),
+    {
+      fetch: workerFetch,
+    },
+  ),
   (env: Env) => ({
     exporter: {
       url: "https://api.honeycomb.io/v1/traces",
@@ -417,13 +426,4 @@ export default instrumentation(
     },
     service: { name: "shipbox-engine" },
   }),
-  withSentry(
-    (env: Env) => ({
-      dsn: env.SENTRY_DSN,
-      tracesSampleRate: 1.0,
-    }),
-    {
-      fetch: workerFetch,
-    },
-  ),
 );

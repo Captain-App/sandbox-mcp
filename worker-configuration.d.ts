@@ -17,6 +17,8 @@ declare namespace Cloudflare {
 		EXECUTE_TASK_WORKFLOW: Workflow<Parameters<import("./src/index").ExecuteTaskWorkflow['run']>[0]['payload']>;
 		SHIPBOX_API: Fetcher;
 		SENTRY_DSN?: string;
+		HONEYCOMB_API_KEY?: string;
+		HONEYCOMB_DATASET?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

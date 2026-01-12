@@ -39,5 +39,10 @@
 		"types": [
 			"./worker-configuration.d.ts"
 		]
-	}
+	},
+	"exclude": [
+		"node_modules",
+		"**/*.integration.test.ts",
+		"**/*.integration.test2.ts"
+	]
 }

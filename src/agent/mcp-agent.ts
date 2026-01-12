@@ -112,10 +112,11 @@ function formatDomainError(error: unknown): ReturnType<typeof formatErrorRespons
  * library's per-connection DO model.
  */
 export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
+  // Use type assertion to handle version mismatch between @modelcontextprotocol/sdk versions
   server = new McpServer({
     name: "opencode-sandbox",
     version: "1.0.0",
-  });
+  }) as any;
 
   /** @public Required by McpAgent base class */
   initialState: AgentState = {
