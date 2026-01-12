@@ -37,6 +37,22 @@ interface SandboxReadyResult {
 }
 
 /**
+ * Utility to execute a command and throw a descriptive error if it fails.
+ */
+async function execOrThrow(
+  sandbox: Sandbox<unknown>,
+  command: string,
+  context: string,
+): Promise<{ stdout: string; stderr: string }> {
+  const result = await sandbox.exec(command);
+  if (result.exitCode !== 0) {
+    const errorMsg = `${context} failed (exit code ${result.exitCode}): ${result.stderr || result.stdout || "No output"}`;
+    throw new Error(errorMsg.slice(0, 1000)); // Truncate to avoid huge errors
+  }
+  return result;
+}
+
+/**
  * Ensure sandbox is ready for use - idempotent initialization.
  *
  * This is the main entry point for sandbox initialization. It checks the
@@ -81,8 +97,14 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
       message: "Restoring OpenCode backup",
       level: "info",
     });
-    const restored = await restoreSession(sandbox, sessionId, bucket);
-    result.restoredBackup = restored;
+    try {
+      const restored = await restoreSession(sandbox, sessionId, bucket);
+      result.restoredBackup = restored;
+    } catch (error) {
+      Sentry.captureException(error, { extra: { sessionId, phase: "restore-session" } });
+      // Don't throw here, allow session to continue without backup if needed
+      // but log it for investigation
+    }
   }
 
   // 3. Check & clone repository (now proxy is configured for git auth)
@@ -145,8 +167,12 @@ async function configureSandboxProxy(
  * Authentication is handled by the proxy via configureGithub().
  */
 async function setupGitConfig(sandbox: Sandbox<unknown>): Promise<void> {
-  await sandbox.exec(`git config --global user.email "opencode@sandbox.workers.dev"`);
-  await sandbox.exec(`git config --global user.name "OpenCode Bot"`);
+  await execOrThrow(
+    sandbox,
+    `git config --global user.email "opencode@sandbox.workers.dev"`,
+    "Git email config",
+  );
+  await execOrThrow(sandbox, `git config --global user.name "OpenCode Bot"`, "Git name config");
 }
 
 /**
@@ -177,18 +203,26 @@ async function cloneRepository(
 
   if (checkResult.stdout.trim() === "exists") {
     // Already cloned, just fetch latest
-    await sandbox.exec(`cd ${targetDir} && git fetch origin`);
+    await execOrThrow(sandbox, `cd ${targetDir} && git fetch origin`, "Git fetch");
     if (branch) {
-      await sandbox.exec(`cd ${targetDir} && git checkout ${branch}`);
+      await execOrThrow(sandbox, `cd ${targetDir} && git checkout ${branch}`, "Git checkout");
     }
     return targetDir;
   }
 
   // Clone the repository
-  await sandbox.gitCheckout(url, {
-    branch: branch ?? "main",
-    targetDir,
-  });
+  try {
+    await sandbox.gitCheckout(url, {
+      branch: branch ?? "main",
+      targetDir,
+    });
+  } catch (error) {
+    // Collect last few lines of git output if possible
+    const lastOutput = await sandbox.exec(
+      `tail -n 20 /tmp/git-checkout.log 2>/dev/null || echo "No log"`,
+    );
+    throw new Error(`Git checkout failed for ${url}: ${error} ${lastOutput.stdout}`);
+  }
 
   return targetDir;
 }

@@ -38,7 +38,7 @@ describe("Backup Helper", () => {
       mockBucket.get.mockResolvedValue({
         arrayBuffer: async () => mockData.buffer,
       });
-      mockSandbox.exec.mockResolvedValue({ stdout: "ok" });
+      mockSandbox.exec.mockResolvedValue({ stdout: "ok", exitCode: 0 });
 
       const result = await restoreSession(mockSandbox as any, sessionId, mockBucket as any);
 
@@ -53,7 +53,7 @@ describe("Backup Helper", () => {
       // 1. tar command
       mockSandbox.exec.mockResolvedValueOnce({ exitCode: 0 });
       // 2. test -f command
-      mockSandbox.exec.mockResolvedValueOnce({ stdout: "exists" });
+      mockSandbox.exec.mockResolvedValueOnce({ stdout: "exists", exitCode: 0 });
 
       const mockStream = {};
       mockSandbox.readFileStream.mockResolvedValue(mockStream);
@@ -73,8 +73,10 @@ describe("Backup Helper", () => {
     });
 
     it("should skip backup if tar fails", async () => {
-      mockSandbox.exec.mockResolvedValueOnce({ exitCode: 1 });
-      await backupSession(mockSandbox as any, sessionId, mockBucket as any);
+      mockSandbox.exec.mockResolvedValueOnce({ exitCode: 1, stderr: "tar error" });
+      await expect(backupSession(mockSandbox as any, sessionId, mockBucket as any)).rejects.toThrow(
+        /Failed to create backup archive/,
+      );
       expect(mockBucket.put).not.toHaveBeenCalled();
     });
   });

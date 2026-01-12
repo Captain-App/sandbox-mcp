@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { Schema } from "effect";
 
 // Mock agents/mcp
 vi.mock("agents/mcp", () => ({
@@ -27,8 +26,6 @@ vi.mock("../proxy", () => ({
 
 import { OpenCodeMcpAgent } from "./mcp-agent";
 import * as Proxy from "../proxy";
-import { SessionStorage } from "../services/session";
-import { RunStorage } from "../services/run";
 import { Effect, Option, Exit } from "effect";
 
 describe("OpenCodeMcpAgent", () => {

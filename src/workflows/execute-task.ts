@@ -74,58 +74,73 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     try {
       // Step 0: Pre-flight balance check
       await step.do("check-balance", async () => {
-        Sentry.addBreadcrumb({ category: "workflow", message: "Checking balance", level: "info" });
-        const balanceRes = await this.env.SHIPBOX_API.fetch(
-          `http://api/internal/check-balance/${params.userId}`,
-        );
-        if (!balanceRes.ok) {
-          const errorData = (await balanceRes.json()) as any;
-          throw new Error(errorData.error || "Insufficient balance");
-        }
-        return { ok: true };
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "check-balance");
+          Sentry.addBreadcrumb({
+            category: "workflow",
+            message: "Checking balance",
+            level: "info",
+          });
+
+          const balanceRes = await this.env.SHIPBOX_API.fetch(
+            `http://api/internal/check-balance/${params.userId}`,
+          );
+          if (!balanceRes.ok) {
+            const errorData = (await balanceRes.json()) as any;
+            throw new Error(errorData.error || "Insufficient balance");
+          }
+          return { ok: true };
+        });
       });
 
       // Step 1: Create run record in R2 (doesn't need sandbox)
       await step.do("create-run", async () => {
-        Sentry.addBreadcrumb({
-          category: "workflow",
-          message: "Creating run record",
-          level: "info",
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "create-run");
+          Sentry.addBreadcrumb({
+            category: "workflow",
+            message: "Creating run record",
+            level: "info",
+          });
+          const run: RunRecord = {
+            runId: params.runId,
+            sessionId: params.sessionId,
+            workflowId: event.instanceId,
+            status: "started",
+            task: params.task,
+            title: params.title,
+            model: params.model,
+            startedAt: Date.now(),
+          };
+          await Run.createRun(deps.sessionsBucket, run);
+          return { created: true };
         });
-        const run: RunRecord = {
-          runId: params.runId,
-          sessionId: params.sessionId,
-          workflowId: event.instanceId,
-          status: "started",
-          task: params.task,
-          title: params.title,
-          model: params.model,
-          startedAt: Date.now(),
-        };
-        await Run.createRun(deps.sessionsBucket, run);
-        return { created: true };
       });
 
       // Step 2: Ensure sandbox is ready (restore backup, clone repo, configure proxy)
       // This is idempotent - safe to retry if workflow step fails
       const sandboxResult = await step.do("ensure-sandbox-ready", async () => {
-        Sentry.addBreadcrumb({
-          category: "workflow",
-          message: "Ensuring sandbox ready",
-          level: "info",
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "ensure-sandbox-ready");
+          Sentry.addBreadcrumb({
+            category: "workflow",
+            message: "Ensuring sandbox ready",
+            level: "info",
+            data: { repository: params.repositoryUrl },
+          });
+          const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
+          const result = await Sandbox.ensureSandboxReady({
+            sandbox,
+            sessionId: params.sessionId,
+            bucket: deps.sessionsBucket,
+            proxyBaseUrl: params.proxyBaseUrl,
+            proxyToken: params.proxyToken,
+            repository: params.repositoryUrl
+              ? { url: params.repositoryUrl, branch: params.branch }
+              : undefined,
+          });
+          return result;
         });
-        const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-        const result = await Sandbox.ensureSandboxReady({
-          sandbox,
-          sessionId: params.sessionId,
-          bucket: deps.sessionsBucket,
-          proxyBaseUrl: params.proxyBaseUrl,
-          proxyToken: params.proxyToken,
-          repository: params.repositoryUrl
-            ? { url: params.repositoryUrl, branch: params.branch }
-            : undefined,
-        });
-        return result;
       });
       telemetry.setMetadata({ sessionRestored: sandboxResult.restoredBackup });
 
@@ -133,15 +148,19 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
       // Step 2.5: Update session with workspace path immediately for web UI access
       await step.do("update-workspace-path", async () => {
-        Sentry.addBreadcrumb({
-          category: "workflow",
-          message: "Updating workspace path",
-          level: "info",
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "update-workspace-path");
+          Sentry.addBreadcrumb({
+            category: "workflow",
+            message: "Updating workspace path",
+            level: "info",
+            data: { workingDirectory },
+          });
+          await Run.updateSessionAfterRun(deps.sessionsBucket, params.sessionId, {
+            workspacePath: workingDirectory,
+          });
+          return { updated: true };
         });
-        await Run.updateSessionAfterRun(deps.sessionsBucket, params.sessionId, {
-          workspacePath: workingDirectory,
-        });
-        return { updated: true };
       });
 
       // Step 3: Start OpenCode and execute task
@@ -156,44 +175,53 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
           timeout: "50 minutes",
         },
         async () => {
-          Sentry.addBreadcrumb({
-            category: "workflow",
-            message: "Executing OpenCode task",
-            level: "info",
-            data: { task: params.task },
+          return await Sentry.withScope(async (scope) => {
+            scope.setTag("step", "execute-opencode-task");
+            Sentry.addBreadcrumb({
+              category: "workflow",
+              message: "Executing OpenCode task",
+              level: "info",
+              data: { task: params.task },
+            });
+            const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
+            return OpenCode.executeTask(sandbox, params, workingDirectory);
           });
-          const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-          return OpenCode.executeTask(sandbox, params, workingDirectory);
         },
       );
 
       // Step 4: Get session title (auto-generated by OpenCode)
       const title = await step.do("get-session-title", async () => {
-        Sentry.addBreadcrumb({
-          category: "workflow",
-          message: "Getting session title",
-          level: "info",
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "get-session-title");
+          Sentry.addBreadcrumb({
+            category: "workflow",
+            message: "Getting session title",
+            level: "info",
+          });
+          const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
+          return OpenCode.getSessionTitle(
+            sandbox,
+            executeResult.opencodeSessionId,
+            params.proxyBaseUrl,
+            params.proxyToken,
+            workingDirectory,
+          );
         });
-        const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-        return OpenCode.getSessionTitle(
-          sandbox,
-          executeResult.opencodeSessionId,
-          params.proxyBaseUrl,
-          params.proxyToken,
-          workingDirectory,
-        );
       });
 
       // Step 5: Backup session state to R2
       await step.do("backup-session", async () => {
-        Sentry.addBreadcrumb({
-          category: "workflow",
-          message: "Backing up session",
-          level: "info",
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "backup-session");
+          Sentry.addBreadcrumb({
+            category: "workflow",
+            message: "Backing up session",
+            level: "info",
+          });
+          const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
+          await Backup.backupSession(sandbox, params.sessionId, deps.sessionsBucket);
+          return { backedUp: true };
         });
-        const sandbox = Sandbox.getSandbox(deps, params.sandboxId);
-        await Backup.backupSession(sandbox, params.sessionId, deps.sessionsBucket);
-        return { backedUp: true };
       });
 
       const result: TaskResult = {
@@ -208,21 +236,24 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
 
       // Step 6: Complete run and update session in R2
       await step.do("complete-run", async () => {
-        await Run.completeRun(deps.sessionsBucket, params.runId, {
-          success: result.success,
-          output: result.output,
-          error: result.error,
-          title: result.title,
-        });
-
-        if (result.opencodeSessionId || result.workspacePath) {
-          await Run.updateSessionAfterRun(deps.sessionsBucket, params.sessionId, {
-            opencodeSessionId: result.opencodeSessionId,
-            workspacePath: result.workspacePath,
+        return await Sentry.withScope(async (scope) => {
+          scope.setTag("step", "complete-run");
+          await Run.completeRun(deps.sessionsBucket, params.runId, {
+            success: result.success,
+            output: result.output,
+            error: result.error,
+            title: result.title,
           });
-        }
 
-        return { completed: true };
+          if (result.opencodeSessionId || result.workspacePath) {
+            await Run.updateSessionAfterRun(deps.sessionsBucket, params.sessionId, {
+              opencodeSessionId: result.opencodeSessionId,
+              workspacePath: result.workspacePath,
+            });
+          }
+
+          return { completed: true };
+        });
       });
 
       // Emit success telemetry

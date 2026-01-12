@@ -45,10 +45,11 @@ describe("Sandbox Helper: ensureSandboxReady", () => {
 
     // Flexible exec mock based on command content
     mockSandbox.exec.mockImplementation(async (cmd: string) => {
-      if (cmd.includes("ANTHROPIC_BASE_URL")) return { stdout: "missing" };
-      if (cmd.includes("~/.local/share/opencode/storage")) return { stdout: "missing" };
-      if (cmd.includes(".git && echo exists")) return { stdout: "missing" };
-      return { stdout: "ok" };
+      if (cmd.includes("ANTHROPIC_BASE_URL")) return { stdout: "missing", exitCode: 0 };
+      if (cmd.includes("~/.local/share/opencode/storage"))
+        return { stdout: "missing", exitCode: 0 };
+      if (cmd.includes(".git && echo exists")) return { stdout: "missing", exitCode: 0 };
+      return { stdout: "ok", exitCode: 0 };
     });
   });
 
@@ -69,8 +70,8 @@ describe("Sandbox Helper: ensureSandboxReady", () => {
   });
 
   it("should skip steps if already configured (idempotency)", async () => {
-    mockSandbox.exec.mockImplementation(async (cmd: string) => {
-      return { stdout: "exists" };
+    mockSandbox.exec.mockImplementation(async (_cmd: string) => {
+      return { stdout: "exists", exitCode: 0 };
     });
 
     const result = await ensureSandboxReady(params);
@@ -88,8 +89,8 @@ describe("Sandbox Helper: ensureSandboxReady", () => {
     const noRepoParams = { ...params, repository: undefined };
 
     // Proxy exists, Storage exists
-    mockSandbox.exec.mockResolvedValueOnce({ stdout: "exists" });
-    mockSandbox.exec.mockResolvedValueOnce({ stdout: "exists" });
+    mockSandbox.exec.mockResolvedValueOnce({ stdout: "exists", exitCode: 0 });
+    mockSandbox.exec.mockResolvedValueOnce({ stdout: "exists", exitCode: 0 });
 
     const result = await ensureSandboxReady(noRepoParams);
 

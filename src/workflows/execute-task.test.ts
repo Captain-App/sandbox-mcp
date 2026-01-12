@@ -11,7 +11,7 @@ vi.mock("cloudflare:workers", () => ({
 }));
 
 import { ExecuteTaskWorkflow } from "./execute-task";
-import { Sandbox, Run, OpenCode, Backup } from "./helpers";
+import { Sandbox, Run, OpenCode } from "./helpers";
 
 // Mock helpers
 vi.mock("./helpers", () => ({
