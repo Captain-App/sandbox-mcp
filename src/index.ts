@@ -9,7 +9,7 @@ import { instrument } from "@microlabs/otel-cf-workers";
 
 import { OpenCodeMcpAgent } from "./agent/mcp-agent";
 import { RealtimeChannel } from "./realtime";
-import type { SessionMetadata, RunRecord } from "@shipbox/shared";
+import type { SessionMetadata, RunRecord, SessionId } from "@shipbox/shared";
 import { DEFAULT_MODEL, withRequestContext, withSentry, LoggerLayer } from "@shipbox/shared";
 import {
   anthropic,
@@ -386,8 +386,16 @@ const workerFetch = async (
 
   // Create session
   if (url.pathname === "/internal/sessions" && request.method === "POST") {
-    const body = (await request.json()) as any;
-    const sessionId = crypto.randomUUID().slice(0, 8) as any;
+    const body = (await request.json()) as {
+      userId: string;
+      repository?: string;
+      branch?: string;
+      name?: string;
+      title?: string;
+      model?: string;
+      region?: string;
+    };
+    const sessionId = crypto.randomUUID().slice(0, 8) as SessionId;
     const now = Date.now();
     // Use public URL for webUiUrl, not the internal service binding URL
     const publicBaseUrl =
@@ -402,18 +410,15 @@ const workerFetch = async (
       webUiUrl: `${publicBaseUrl}/session/${sessionId}/`,
       userId: body.userId,
       repository:
-        body.repository && typeof body.repository === "string" && body.repository.trim() !== ""
+        body.repository && body.repository.trim() !== ""
           ? { url: body.repository, branch: body.branch ?? "main" }
           : undefined,
-      title: body.name || body.title,
+      title: body.name || body.title || "New Session",
       config: {
         defaultModel: body.model || "claude-sonnet-4-5",
         region: body.region || "lhr",
       },
-      clonedRepos:
-        body.repository && typeof body.repository === "string" && body.repository.trim() !== ""
-          ? [body.repository]
-          : [],
+      clonedRepos: body.repository && body.repository.trim() !== "" ? [body.repository] : [],
     };
 
     const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();

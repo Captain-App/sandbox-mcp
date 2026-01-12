@@ -1,5 +1,16 @@
 // src/realtime/channel.test.ts
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock cloudflare:workers
+vi.mock("cloudflare:workers", () => ({
+  DurableObject: class {
+    constructor(
+      public ctx: any,
+      public env: any,
+    ) {}
+  },
+}));
+
 import { RealtimeChannel } from "./channel";
 
 describe("RealtimeChannel", () => {
@@ -20,7 +31,9 @@ describe("RealtimeChannel", () => {
     ctx = {
       id: { toString: () => "test-session" },
       storage,
-      blockConcurrencyWhile: vi.fn((cb) => cb()),
+      blockConcurrencyWhile: vi.fn(async (cb) => {
+        await cb();
+      }),
       acceptWebSocket: vi.fn(),
       getWebSockets: vi.fn().mockReturnValue([]),
     };
@@ -64,6 +77,9 @@ describe("RealtimeChannel", () => {
   it("should replay missed events on connection", async () => {
     storage.get.mockResolvedValueOnce(10); // seq = 10
     const channel = new RealtimeChannel(ctx, env);
+
+    // Ensure initialization finishes
+    await Promise.resolve();
 
     const event = { seq: 5, type: "old", timestamp: 123, sessionId: "test", data: {} };
     storage.list.mockResolvedValueOnce(new Map([["event:5", event]]));

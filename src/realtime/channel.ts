@@ -188,7 +188,8 @@ export class RealtimeChannel extends DurableObject<Env> {
   /**
    * WebSocket close handler
    */
-  async webSocketClose(ws: WebSocket, code: number, reason: string, _wasClean: boolean) {
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    console.log(`WebSocket closed: ${code} ${reason} (clean: ${wasClean})`);
     ws.close(code, reason);
   }
 

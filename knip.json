@@ -1,0 +1,24 @@
+{
+  "ignore": ["scripts/test-deploy-flow.ts", "src/index.integration.test.ts"],
+  "ignoreDependencies": [
+    "@shipbox/shared",
+    "ai",
+    "@cloudflare/vitest-pool-workers",
+    "wrangler",
+    "lefthook",
+    "oxfmt",
+    "oxlint",
+    "@cloudflare/workers-types",
+    "concurrently",
+    "cloudflare"
+  ],
+  "ignoreBinaries": [
+    "wrangler",
+    "concurrently",
+    "oxlint",
+    "oxfmt",
+    "tsc",
+    "knip",
+    "lefthook"
+  ]
+}
