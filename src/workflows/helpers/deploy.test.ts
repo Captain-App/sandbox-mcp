@@ -76,7 +76,10 @@ describe("Deploy Helper", () => {
     mockSandbox.exec.mockResolvedValue({ exitCode: 0, stdout: "ok" });
     (global.fetch as any).mockResolvedValue({
       ok: false,
-      json: async () => ({ success: false, errors: [{ message: "Invalid script" }] }),
+      json: async () => ({
+        success: false,
+        errors: [{ message: "Invalid script" }],
+      }),
     });
 
     const result = await deployWorker(params);

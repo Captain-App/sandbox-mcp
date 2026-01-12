@@ -35,7 +35,12 @@ describe("Proxy Handler", () => {
 
   it("should successfully proxy a valid request", async () => {
     const token = "valid-token";
-    const jwtPayload = { userId: "user-1", sandboxId: "sb-1", exp: 123, iat: 123 };
+    const jwtPayload = {
+      userId: "user-1",
+      sandboxId: "sb-1",
+      exp: 123,
+      iat: 123,
+    };
 
     mockService.validate.mockResolvedValue(token);
     vi.mocked(Token.verifyProxyTokenAsync).mockResolvedValue(jwtPayload);
@@ -52,7 +57,10 @@ describe("Proxy Handler", () => {
     expect(await response.text()).toBe("target response");
 
     expect(mockService.validate).toHaveBeenCalledWith(request);
-    expect(Token.verifyProxyTokenAsync).toHaveBeenCalledWith({ secret: SECRET, token });
+    expect(Token.verifyProxyTokenAsync).toHaveBeenCalledWith({
+      secret: SECRET,
+      token,
+    });
     expect(mockService.transform).toHaveBeenCalled();
 
     const forwardCall = vi.mocked(global.fetch).mock.calls[0][0] as Request;
@@ -99,7 +107,9 @@ describe("Proxy Handler", () => {
       iat: 123,
     });
 
-    const errorRes = new Response(JSON.stringify({ error: "denied" }), { status: 403 });
+    const errorRes = new Response(JSON.stringify({ error: "denied" }), {
+      status: 403,
+    });
     mockService.transform.mockResolvedValue(errorRes);
 
     const request = new Request("https://worker.dev/proxy/example/path");

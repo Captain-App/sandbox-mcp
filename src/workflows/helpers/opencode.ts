@@ -218,7 +218,9 @@ export async function executeTask(
 
   try {
     // Start OpenCode server in the sandbox and get SDK client
-    log("executeTask.createOpencode", "Creating OpenCode server and client", { taskId });
+    log("executeTask.createOpencode", "Creating OpenCode server and client", {
+      taskId,
+    });
     const result = await createOpencode<OpencodeClient>(sandbox, {
       port: 4096,
       directory: workingDirectory,
@@ -245,7 +247,10 @@ export async function executeTask(
       });
     } else {
       // Try to list existing sessions with proper directory context
-      log("executeTask.listSessions", "Listing existing sessions", { taskId, workingDirectory });
+      log("executeTask.listSessions", "Listing existing sessions", {
+        taskId,
+        workingDirectory,
+      });
       const existingSessions = (await client.session.list({
         query: { directory: workingDirectory },
       })) as OpenCodeSessionListResponse;
@@ -265,7 +270,10 @@ export async function executeTask(
         });
       } else {
         // Create a new session with directory context (no title - let OpenCode auto-generate)
-        log("executeTask.createSession", "Creating new session", { taskId, workingDirectory });
+        log("executeTask.createSession", "Creating new session", {
+          taskId,
+          workingDirectory,
+        });
         const created = (await client.session.create({
           query: { directory: workingDirectory },
         })) as OpenCodeSessionCreateResponse;

@@ -84,7 +84,10 @@ describe("OpenCodeMcpAgent - Worker Tools", () => {
         request: new Request("https://worker.dev/mcp"),
       });
 
-      const result = await previewWorker({ sessionId: "sess-1", workerPath: "index.ts" });
+      const result = await previewWorker({
+        sessionId: "sess-1",
+        workerPath: "index.ts",
+      });
       const data = JSON.parse(result.content[0].text);
 
       expect(data.success).toBe(true);
@@ -99,7 +102,10 @@ describe("OpenCodeMcpAgent - Worker Tools", () => {
 
       agent.runtime.runPromiseExit.mockResolvedValueOnce(Exit.succeed(Option.none()));
 
-      const result = await previewWorker({ sessionId: "missing", workerPath: "index.ts" });
+      const result = await previewWorker({
+        sessionId: "missing",
+        workerPath: "index.ts",
+      });
       const data = JSON.parse(result.content[0].text);
 
       expect(data.error.code).toBe("SESSION_NOT_FOUND");
@@ -112,7 +118,11 @@ describe("OpenCodeMcpAgent - Worker Tools", () => {
         (c: any) => c[0] === "opencode_deploy_worker",
       )[2];
 
-      const session = { sessionId: "sess-1", sandboxId: "sb-1", userId: "user-1" };
+      const session = {
+        sessionId: "sess-1",
+        sandboxId: "sb-1",
+        userId: "user-1",
+      };
       agent.runtime.runPromiseExit.mockResolvedValueOnce(Exit.succeed(Option.some(session)));
       agent.runtime.runPromise.mockResolvedValueOnce("jwt-token");
       vi.mocked(Helpers.Deploy.deployWorker).mockResolvedValueOnce({
@@ -125,7 +135,10 @@ describe("OpenCodeMcpAgent - Worker Tools", () => {
         request: new Request("https://worker.dev/mcp"),
       });
 
-      const result = await deployWorkerTool({ sessionId: "sess-1", workerPath: "index.ts" });
+      const result = await deployWorkerTool({
+        sessionId: "sess-1",
+        workerPath: "index.ts",
+      });
       const data = JSON.parse(result.content[0].text);
 
       expect(data.success).toBe(true);

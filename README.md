@@ -89,7 +89,7 @@ Check the status and result of a task.
 
 ```typescript
 {
-  runId: string           // The run ID from run_task
+  runId: string; // The run ID from run_task
 }
 ```
 
@@ -126,7 +126,7 @@ By default, sandbox-mcp uses Anthropic with `claude-sonnet-4-5`. To use a differ
 Edit `src/models/session.ts` and change `DEFAULT_MODEL`:
 
 ```typescript
-export const DEFAULT_MODEL = "claude-opus-4-5";  // Change this
+export const DEFAULT_MODEL = "claude-opus-4-5"; // Change this
 ```
 
 ### Using a Different Provider
@@ -134,12 +134,14 @@ export const DEFAULT_MODEL = "claude-opus-4-5";  // Change this
 To use a different provider (e.g., OpenAI), you'll need to modify these files:
 
 1. **Add a proxy service** - Create `src/proxy/services/openai.ts`:
+
    ```typescript
    import type { ServiceConfig } from "../types";
 
    export const openai: ServiceConfig<Env> = {
      target: "https://api.openai.com/v1",
-     validate: (req) => req.headers.get("authorization")?.replace("Bearer ", ""),
+     validate: (req) =>
+       req.headers.get("authorization")?.replace("Bearer ", ""),
      transform: async (req, ctx) => {
        req.headers.set("authorization", `Bearer ${ctx.env.OPENAI_API_KEY}`);
        return req;
@@ -148,11 +150,13 @@ To use a different provider (e.g., OpenAI), you'll need to modify these files:
    ```
 
 2. **Register the service** - Export it from `src/proxy/services/index.ts`:
+
    ```typescript
    export { openai } from "./openai";
    ```
 
 3. **Update OpenCode config** - In `src/workflows/helpers/opencode.ts`, update `buildProxyConfig()`:
+
    ```typescript
    function buildProxyConfig(proxyBaseUrl: string, proxyToken: string): Config {
      const containerProxyUrl = toContainerUrl(proxyBaseUrl);
@@ -170,6 +174,7 @@ To use a different provider (e.g., OpenAI), you'll need to modify these files:
    ```
 
 4. **Update task execution** - In the same file, change `providerID` in `executeTask()`:
+
    ```typescript
    model: {
      providerID: "openai",  // Change from "anthropic"
@@ -178,13 +183,14 @@ To use a different provider (e.g., OpenAI), you'll need to modify these files:
    ```
 
 5. **Add the secret**:
+
    ```bash
    wrangler secret put OPENAI_API_KEY
    ```
 
 6. **Update the default model** - In `src/models/session.ts`:
    ```typescript
-   export const DEFAULT_MODEL = "gpt-5.2";  // OpenAI model
+   export const DEFAULT_MODEL = "gpt-5.2"; // OpenAI model
    ```
 
 See the [OpenCode provider documentation](https://opencode.ai/docs/providers) for supported providers and their configuration.

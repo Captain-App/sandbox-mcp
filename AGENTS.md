@@ -40,13 +40,13 @@ This is an MCP server that delegates coding tasks to OpenCode running in Cloudfl
 
 ### Key Components
 
-| Component | Purpose |
-|-----------|---------|
-| **Worker** | HTTP routing, MCP endpoint, proxy |
-| **MCP Agent (DO)** | Protocol handling, tool implementation |
-| **Workflow** | Long-running task orchestration (up to 50min) |
-| **Sandbox** | Isolated container running OpenCode |
-| **R2** | Session metadata, workspace persistence |
+| Component          | Purpose                                       |
+| ------------------ | --------------------------------------------- |
+| **Worker**         | HTTP routing, MCP endpoint, proxy             |
+| **MCP Agent (DO)** | Protocol handling, tool implementation        |
+| **Workflow**       | Long-running task orchestration (up to 50min) |
+| **Sandbox**        | Isolated container running OpenCode           |
+| **R2**             | Session metadata, workspace persistence       |
 
 ## Tech Stack
 
@@ -136,12 +136,12 @@ export const myToolInputSchema = {
 
 Configured in `wrangler.jsonc`:
 
-| Binding | Type | Purpose |
-|---------|------|---------|
-| `MCP_AGENT` | Durable Object | MCP protocol handler |
-| `Sandbox` | Durable Object | Container instances |
-| `SESSIONS_BUCKET` | R2 Bucket | Session/workspace storage |
-| `EXECUTE_TASK_WORKFLOW` | Workflow | Task execution |
+| Binding                 | Type           | Purpose                   |
+| ----------------------- | -------------- | ------------------------- |
+| `MCP_AGENT`             | Durable Object | MCP protocol handler      |
+| `Sandbox`               | Durable Object | Container instances       |
+| `SESSIONS_BUCKET`       | R2 Bucket      | Session/workspace storage |
+| `EXECUTE_TASK_WORKFLOW` | Workflow       | Task execution            |
 
 ### Storage Layout
 
@@ -166,6 +166,7 @@ Sandbox → JWT as API key → Proxy → Real credentials → External API
 ```
 
 **Provider support:** Currently hardcoded to Anthropic. To add other providers, see the [Customizing the Provider](./README.md#customizing-the-provider) section in README. The key files are:
+
 - `src/proxy/services/` - Service configs (target URL, auth injection)
 - `src/workflows/helpers/opencode.ts` - OpenCode config and model selection
 
@@ -232,6 +233,7 @@ src/
 Sessions are in R2 via `SessionStorage` service. Runs are in R2 via `RunStorage` service.
 
 To add a field to SessionMetadata:
+
 1. Update schema in `src/models/session.ts`
 2. Update `SessionIndexEntry` in `src/services/session.ts` if needed for listing
 3. Update tests
@@ -256,8 +258,11 @@ Tests use mock layers for Effect services. Example:
 const createMockBucket = () => {
   const store = new Map<string, string>();
   return {
-    get: async (key) => store.get(key) ? { json: async () => JSON.parse(store.get(key)!) } : null,
-    put: async (key, value) => { store.set(key, value); },
+    get: async (key) =>
+      store.get(key) ? { json: async () => JSON.parse(store.get(key)!) } : null,
+    put: async (key, value) => {
+      store.set(key, value);
+    },
     // ...
   } as unknown as R2Bucket;
 };

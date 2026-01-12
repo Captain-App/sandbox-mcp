@@ -15,9 +15,12 @@ interface DeployParams {
 /**
  * Bundle and deploy a worker to Workers for Platforms.
  */
-export async function deployWorker(
-  params: DeployParams,
-): Promise<{ success: boolean; workerName: string; url: string; error?: string }> {
+export async function deployWorker(params: DeployParams): Promise<{
+  success: boolean;
+  workerName: string;
+  url: string;
+  error?: string;
+}> {
   const { sandbox, sessionId, workerPath, name, accountId, apiToken, dispatchNamespace } = params;
 
   const workerName = name || `sandbox-${sessionId}`;
@@ -57,7 +60,9 @@ export async function deployWorker(
     const formData = new FormData();
 
     // Add the main script as a module
-    const scriptBlob = new Blob([script], { type: "application/javascript+module" });
+    const scriptBlob = new Blob([script], {
+      type: "application/javascript+module",
+    });
     formData.append("index.js", scriptBlob, "index.js");
 
     // Add metadata

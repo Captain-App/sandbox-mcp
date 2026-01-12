@@ -73,7 +73,10 @@ describe("Backup Helper", () => {
     });
 
     it("should skip backup if tar fails", async () => {
-      mockSandbox.exec.mockResolvedValueOnce({ exitCode: 1, stderr: "tar error" });
+      mockSandbox.exec.mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: "tar error",
+      });
       await expect(backupSession(mockSandbox as any, sessionId, mockBucket as any)).rejects.toThrow(
         /Failed to create backup archive/,
       );

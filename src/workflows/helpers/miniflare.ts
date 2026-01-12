@@ -18,7 +18,12 @@ export async function startMiniflare(
   sandbox: Sandbox<unknown>,
   workerPath: string,
   port: number = 8787,
-): Promise<{ success: boolean; port: number; logPath: string; error?: string }> {
+): Promise<{
+  success: boolean;
+  port: number;
+  logPath: string;
+  error?: string;
+}> {
   // Extract work directory - go up from src/index.ts to the project root
   // e.g., /workspace/my-worker/src/index.ts -> /workspace/my-worker
   let workDir: string;

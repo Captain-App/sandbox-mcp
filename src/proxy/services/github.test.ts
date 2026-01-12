@@ -63,7 +63,9 @@ describe("GitHub Proxy Service", () => {
 
   it("should use user installation token when available", async () => {
     mockEnv.SHIPBOX_API.fetch.mockResolvedValue(
-      new Response(JSON.stringify({ githubToken: "user-inst-token" }), { status: 200 }),
+      new Response(JSON.stringify({ githubToken: "user-inst-token" }), {
+        status: 200,
+      }),
     );
 
     const request = new Request("https://github.com/owner/repo/info/refs");
@@ -83,7 +85,10 @@ describe("GitHub Proxy Service", () => {
     );
 
     const request = new Request("https://github.com/owner/repo/info/refs");
-    const result = await github.transform(request, { ...mockCtx, env: envNoToken } as any);
+    const result = await github.transform(request, {
+      ...mockCtx,
+      env: envNoToken,
+    } as any);
 
     expect(result).toBeInstanceOf(Response);
     const response = result as Response;

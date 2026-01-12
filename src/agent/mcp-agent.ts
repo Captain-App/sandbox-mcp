@@ -326,7 +326,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             }
 
             if (existing.value._tag === "None") {
-              const error = new SessionNotFoundError({ sessionId: params.sessionId });
+              const error = new SessionNotFoundError({
+                sessionId: params.sessionId,
+              });
               telemetry.setError({
                 type: error._tag,
                 code: error._tag,
@@ -695,7 +697,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
           // 2. Get sandbox and start miniflare
           const sandbox = SandboxHelper.getSandbox(
-            { sandboxBinding: this.env.Sandbox, sessionsBucket: this.env.SESSIONS_BUCKET },
+            {
+              sandboxBinding: this.env.Sandbox,
+              sessionsBucket: this.env.SESSIONS_BUCKET,
+            },
             session.sandboxId,
           );
 
@@ -802,7 +807,10 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
 
           // 2. Get sandbox and deploy
           const sandbox = SandboxHelper.getSandbox(
-            { sandboxBinding: this.env.Sandbox, sessionsBucket: this.env.SESSIONS_BUCKET },
+            {
+              sandboxBinding: this.env.Sandbox,
+              sessionsBucket: this.env.SESSIONS_BUCKET,
+            },
             session.sandboxId,
           );
 

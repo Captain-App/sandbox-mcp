@@ -1,6 +1,6 @@
 /**
  * Manual verification script for Worker Deploy tools.
- * 
+ *
  * This script demonstrates how an agent would use the new tools.
  */
 
@@ -27,19 +27,19 @@ async function main() {
         arguments: {
           sessionId: SESSION_ID,
           workerPath: "/workspace/worker/index.ts",
-          port: 8787
-        }
-      }
-    })
+          port: 8787,
+        },
+      },
+    }),
   });
-  
+
   const previewData = (await previewRes.json()) as any;
   console.log("Response:", JSON.stringify(previewData, null, 2));
 
   if (previewData && previewData.content) {
     const text = JSON.parse(previewData.content[0].text);
     console.log(`✅ Preview URL: ${text.previewUrl}`);
-    
+
     // 3. Verify Proxy Routing
     console.log(`\n3. Verifying proxy routing at ${text.previewUrl}...`);
     const routeRes = await fetch(text.previewUrl);
@@ -57,10 +57,10 @@ async function main() {
         name: "opencode_deploy_worker",
         arguments: {
           sessionId: SESSION_ID,
-          workerPath: "/workspace/worker/index.ts"
-        }
-      }
-    })
+          workerPath: "/workspace/worker/index.ts",
+        },
+      },
+    }),
   });
 
   const deployData = await deployRes.json();

@@ -377,7 +377,11 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
       // Record error in Sentry
       Sentry.captureException(error, {
         tags: { category },
-        extra: { workflowId: event.instanceId, runId: params.runId, sessionId: params.sessionId },
+        extra: {
+          workflowId: event.instanceId,
+          runId: params.runId,
+          sessionId: params.sessionId,
+        },
       });
 
       // Record error in telemetry

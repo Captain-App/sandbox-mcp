@@ -81,7 +81,13 @@ describe("RealtimeChannel", () => {
     // Ensure initialization finishes
     await Promise.resolve();
 
-    const event = { seq: 5, type: "old", timestamp: 123, sessionId: "test", data: {} };
+    const event = {
+      seq: 5,
+      type: "old",
+      timestamp: 123,
+      sessionId: "test",
+      data: {},
+    };
     storage.list.mockResolvedValueOnce(new Map([["event:5", event]]));
 
     const ws = { send: vi.fn() };

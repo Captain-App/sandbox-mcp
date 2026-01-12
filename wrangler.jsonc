@@ -1,104 +1,104 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "shipbox-engine",
-	"main": "src/index.ts",
-	"compatibility_date": "2025-05-06",
-	"compatibility_flags": ["nodejs_compat"],
-	"routes": [
-		{ "pattern": "engine.shipbox.dev/*", "zone_name": "shipbox.dev" },
-		{ "pattern": "*.preview.shipbox.dev/*", "zone_name": "shipbox.dev" }
-	],
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shipbox-engine",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "engine.shipbox.dev/*", "zone_name": "shipbox.dev" },
+    { "pattern": "*.preview.shipbox.dev/*", "zone_name": "shipbox.dev" },
+  ],
 
-	"observability": {
-		"enabled": true
-	},
+  "observability": {
+    "enabled": true,
+  },
 
-	// Container configuration for Sandbox
-	// The Dockerfile extends cloudflare/sandbox with OpenCode installed
-	"containers": [
-		{
-			"class_name": "Sandbox",
-			"image": "./Dockerfile",
-			"instance_type": "standard-1",
-			"max_instances": 10
-		}
-	],
+  // Container configuration for Sandbox
+  // The Dockerfile extends cloudflare/sandbox with OpenCode installed
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 10,
+    },
+  ],
 
-	// Durable Objects
-	"durable_objects": {
-		"bindings": [
-			{
-				"name": "MCP_AGENT",
-				"class_name": "OpenCodeMcpAgent"
-			},
-			{
-				"name": "REALTIME_CHANNEL",
-				"class_name": "RealtimeChannel"
-			},
-			{
-				"name": "Sandbox",
-				"class_name": "Sandbox"
-			}
-		]
-	},
+  // Durable Objects
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_AGENT",
+        "class_name": "OpenCodeMcpAgent",
+      },
+      {
+        "name": "REALTIME_CHANNEL",
+        "class_name": "RealtimeChannel",
+      },
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox",
+      },
+    ],
+  },
 
-	// SQLite storage for DOs
-	"migrations": [
-		{
-			"tag": "v1",
-			"new_sqlite_classes": ["OpenCodeMcpAgent", "Sandbox"]
-		},
-		{
-			"tag": "v2",
-			"new_sqlite_classes": ["RealtimeChannel"]
-		}
-	],
+  // SQLite storage for DOs
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["OpenCodeMcpAgent", "Sandbox"],
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RealtimeChannel"],
+    },
+  ],
 
-	// R2 bucket for session persistence (workspace files + OpenCode state)
-	"r2_buckets": [
-		{
-			"binding": "SESSIONS_BUCKET",
-			"bucket_name": "shipbox-sessions"
-		}
-	],
+  // R2 bucket for session persistence (workspace files + OpenCode state)
+  "r2_buckets": [
+    {
+      "binding": "SESSIONS_BUCKET",
+      "bucket_name": "shipbox-sessions",
+    },
+  ],
 
-	// Workflows for long-running tasks
-	"workflows": [
-		{
-			"name": "execute-task-workflow",
-			"binding": "EXECUTE_TASK_WORKFLOW",
-			"class_name": "ExecuteTaskWorkflow"
-		}
-	],
+  // Workflows for long-running tasks
+  "workflows": [
+    {
+      "name": "execute-task-workflow",
+      "binding": "EXECUTE_TASK_WORKFLOW",
+      "class_name": "ExecuteTaskWorkflow",
+    },
+  ],
 
-	"analytics_engine_datasets": [
-		{
-			"binding": "METRICS",
-			"dataset": "shipbox_engine_metrics"
-		}
-	],
+  "analytics_engine_datasets": [
+    {
+      "binding": "METRICS",
+      "dataset": "shipbox_engine_metrics",
+    },
+  ],
 
-	"dispatch_namespaces": [
-		{
-			"binding": "SANDBOX_WORKERS",
-			"namespace": "sandbox-preview-workers"
-		}
-	],
+  "dispatch_namespaces": [
+    {
+      "binding": "SANDBOX_WORKERS",
+      "namespace": "sandbox-preview-workers",
+    },
+  ],
 
-	// Environment variables
-	// Secrets (R2 creds, ANTHROPIC_API_KEY, GITHUB_TOKEN) via wrangler secret put
-	"vars": {
-		"ENVIRONMENT": "production",
-		"SENTRY_DSN": "https://ece4ae70382d63b992074b523d4b830a@o4508794945863680.ingest.de.sentry.io/4510694126977104",
-		"HONEYCOMB_DATASET": "shipbox-engine",
-		"APP_URL": "https://shipbox.dev",
-		"CLOUDFLARE_DISPATCH_NAMESPACE": "sandbox-preview-workers"
-	},
+  // Environment variables
+  // Secrets (R2 creds, ANTHROPIC_API_KEY, GITHUB_TOKEN) via wrangler secret put
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SENTRY_DSN": "https://ece4ae70382d63b992074b523d4b830a@o4508794945863680.ingest.de.sentry.io/4510694126977104",
+    "HONEYCOMB_DATASET": "shipbox-engine",
+    "APP_URL": "https://shipbox.dev",
+    "CLOUDFLARE_DISPATCH_NAMESPACE": "sandbox-preview-workers",
+  },
 
-	"services": [
-		{
-			"binding": "SHIPBOX_API",
-			"service": "shipbox-api"
-		}
-	]
+  "services": [
+    {
+      "binding": "SHIPBOX_API",
+      "service": "shipbox-api",
+    },
+  ],
 }

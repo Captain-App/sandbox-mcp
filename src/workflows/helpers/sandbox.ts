@@ -140,7 +140,11 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     "Proxy config check",
   );
   if (proxyCheck.stdout.trim() === "missing") {
-    Sentry.addBreadcrumb({ category: "sandbox", message: "Configuring proxy", level: "info" });
+    Sentry.addBreadcrumb({
+      category: "sandbox",
+      message: "Configuring proxy",
+      level: "info",
+    });
     await configureSandboxProxy(sandbox, bucket, sessionId, proxyBaseUrl, proxyToken);
     await setupGitConfig(sandbox, bucket, sessionId);
     result.configuredProxy = true;
@@ -164,7 +168,9 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
       const restored = await restoreSession(sandbox, sessionId, bucket);
       result.restoredBackup = restored;
     } catch (error) {
-      Sentry.captureException(error, { extra: { sessionId, phase: "restore-session" } });
+      Sentry.captureException(error, {
+        extra: { sessionId, phase: "restore-session" },
+      });
       // Don't throw here, allow session to continue without backup if needed
       // but log it for investigation
     }

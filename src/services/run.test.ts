@@ -424,7 +424,10 @@ describe("RunStorage (R2)", () => {
         Effect.provide(
           Effect.gen(function* () {
             const storage = yield* RunStorage;
-            return yield* storage.listRuns({ limit: 2, before: oldestInPage1.startedAt });
+            return yield* storage.listRuns({
+              limit: 2,
+              before: oldestInPage1.startedAt,
+            });
           }),
           layer,
         ),
@@ -475,7 +478,10 @@ describe("RunStorage (R2)", () => {
 
       const run1 = createTestRun({ runId: "run-1", sessionId });
       const run2 = createTestRun({ runId: "run-2", sessionId });
-      const run3 = createTestRun({ runId: "run-3", sessionId: "other-session" }); // Different session
+      const run3 = createTestRun({
+        runId: "run-3",
+        sessionId: "other-session",
+      }); // Different session
 
       const program = Effect.gen(function* () {
         const storage = yield* RunStorage;
@@ -491,7 +497,9 @@ describe("RunStorage (R2)", () => {
 
         // Verify session runs are gone but other session's runs remain
         const listAfter = yield* storage.listRuns({ sessionId });
-        const otherSessionRuns = yield* storage.listRuns({ sessionId: "other-session" });
+        const otherSessionRuns = yield* storage.listRuns({
+          sessionId: "other-session",
+        });
         return { deleted: listAfter, remaining: otherSessionRuns };
       });
 

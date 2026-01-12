@@ -51,7 +51,9 @@ describe("Anthropic Proxy Service", () => {
 
   it("should use user key when available", async () => {
     mockEnv.SHIPBOX_API.fetch.mockResolvedValue(
-      new Response(JSON.stringify({ anthropicKey: "user-key" }), { status: 200 }),
+      new Response(JSON.stringify({ anthropicKey: "user-key" }), {
+        status: 200,
+      }),
     );
 
     const request = new Request("https://api.anthropic.com/v1/messages");
@@ -69,7 +71,10 @@ describe("Anthropic Proxy Service", () => {
     );
 
     const request = new Request("https://api.anthropic.com/v1/messages");
-    const result = await anthropic.transform(request, { ...mockCtx, env: envNoKey } as any);
+    const result = await anthropic.transform(request, {
+      ...mockCtx,
+      env: envNoKey,
+    } as any);
 
     expect(result).toBeInstanceOf(Response);
     const response = result as Response;

@@ -151,7 +151,9 @@ const verifyProxyToken = (
         return new ProxyTokenExpiredError({});
       }
       if (message.includes("signature")) {
-        return new ProxyTokenInvalidError({ reason: "Invalid token signature" });
+        return new ProxyTokenInvalidError({
+          reason: "Invalid token signature",
+        });
       }
       if (message.includes("malformed")) {
         return new ProxyTokenInvalidError({ reason: "Malformed token" });

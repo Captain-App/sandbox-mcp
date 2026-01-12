@@ -1,61 +1,61 @@
 {
-	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "shipbox-engine-test",
-	"main": "src/index.ts",
-	"compatibility_date": "2025-05-06",
-	"compatibility_flags": ["nodejs_compat"],
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "shipbox-engine-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-05-06",
+  "compatibility_flags": ["nodejs_compat"],
 
-	// Container configuration for Sandbox
-	"containers": [
-		{
-			"class_name": "Sandbox",
-			"image": "./Dockerfile",
-			"instance_type": "standard-2",
-			"max_instances": 10
-		}
-	],
+  // Container configuration for Sandbox
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 10,
+    },
+  ],
 
-	// Durable Objects
-	"durable_objects": {
-		"bindings": [
-			{
-				"name": "MCP_AGENT",
-				"class_name": "OpenCodeMcpAgent"
-			},
-			{
-				"name": "Sandbox",
-				"class_name": "Sandbox"
-			}
-		]
-	},
+  // Durable Objects
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_AGENT",
+        "class_name": "OpenCodeMcpAgent",
+      },
+      {
+        "name": "Sandbox",
+        "class_name": "Sandbox",
+      },
+    ],
+  },
 
-	// SQLite storage for DOs
-	"migrations": [
-		{
-			"tag": "v1",
-			"new_sqlite_classes": ["OpenCodeMcpAgent", "Sandbox"]
-		}
-	],
+  // SQLite storage for DOs
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["OpenCodeMcpAgent", "Sandbox"],
+    },
+  ],
 
-	// R2 bucket for session persistence
-	"r2_buckets": [
-		{
-			"binding": "SESSIONS_BUCKET",
-			"bucket_name": "shipbox-sessions-test"
-		}
-	],
+  // R2 bucket for session persistence
+  "r2_buckets": [
+    {
+      "binding": "SESSIONS_BUCKET",
+      "bucket_name": "shipbox-sessions-test",
+    },
+  ],
 
-	// Workflows
-	"workflows": [
-		{
-			"name": "execute-task-workflow-test",
-			"binding": "EXECUTE_TASK_WORKFLOW",
-			"class_name": "ExecuteTaskWorkflow"
-		}
-	],
+  // Workflows
+  "workflows": [
+    {
+      "name": "execute-task-workflow-test",
+      "binding": "EXECUTE_TASK_WORKFLOW",
+      "class_name": "ExecuteTaskWorkflow",
+    },
+  ],
 
-	"vars": {
-		"ENVIRONMENT": "test",
-		"PROXY_JWT_SECRET": "test-secret"
-	}
+  "vars": {
+    "ENVIRONMENT": "test",
+    "PROXY_JWT_SECRET": "test-secret",
+  },
 }

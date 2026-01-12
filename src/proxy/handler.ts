@@ -32,14 +32,20 @@ function parseProxyPath(pathname: string, mountPath: string): { service: string;
   const normalizedMount = `/${mountPath.replace(/^\/|\/$/g, "")}`;
 
   if (!pathname.startsWith(normalizedMount)) {
-    throw new ProxyPathInvalidError({ path: pathname, mountPath: normalizedMount });
+    throw new ProxyPathInvalidError({
+      path: pathname,
+      mountPath: normalizedMount,
+    });
   }
 
   const afterMount = pathname.slice(normalizedMount.length);
 
   // Must have at least /{service}
   if (!afterMount.startsWith("/") || afterMount === "/") {
-    throw new ProxyPathInvalidError({ path: pathname, mountPath: normalizedMount });
+    throw new ProxyPathInvalidError({
+      path: pathname,
+      mountPath: normalizedMount,
+    });
   }
 
   const parts = afterMount.slice(1).split("/");
@@ -47,7 +53,10 @@ function parseProxyPath(pathname: string, mountPath: string): { service: string;
   const path = `/${parts.slice(1).join("/")}`;
 
   if (!service) {
-    throw new ProxyPathInvalidError({ path: pathname, mountPath: normalizedMount });
+    throw new ProxyPathInvalidError({
+      path: pathname,
+      mountPath: normalizedMount,
+    });
   }
 
   return { service, path };
@@ -114,7 +123,10 @@ export function createProxyHandler<TEnv = unknown>(
       // Look up service configuration
       const serviceConfig = services[service] as ServiceConfig<TEnv> | undefined;
       if (!serviceConfig) {
-        throw new ProxyServiceNotFoundError({ service, available: serviceNames });
+        throw new ProxyServiceNotFoundError({
+          service,
+          available: serviceNames,
+        });
       }
 
       // Extract token from request using service's validate function
@@ -124,7 +136,10 @@ export function createProxyHandler<TEnv = unknown>(
       }
 
       // Verify the JWT token
-      const jwt = await verifyProxyTokenAsync({ secret: jwtSecret(env), token });
+      const jwt = await verifyProxyTokenAsync({
+        secret: jwtSecret(env),
+        token,
+      });
 
       // Check balance if this is a platform-charged service (like Anthropic)
       if (service === "anthropic") {

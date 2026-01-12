@@ -95,7 +95,9 @@ describe("OpenCodeMcpAgent", () => {
 
       // Set userId and baseUrl from connect
       await agent.onConnect({} as any, {
-        request: new Request("https://worker.dev/mcp", { headers: { "X-User-Id": "user-123" } }),
+        request: new Request("https://worker.dev/mcp", {
+          headers: { "X-User-Id": "user-123" },
+        }),
       });
 
       const result = await runTask({ task: "hello" });
@@ -120,7 +122,9 @@ describe("OpenCodeMcpAgent", () => {
 
       // Mock userId and baseUrl from connect
       await agent.onConnect({} as any, {
-        request: new Request("https://worker.dev/mcp", { headers: { "X-User-Id": "user-123" } }),
+        request: new Request("https://worker.dev/mcp", {
+          headers: { "X-User-Id": "user-123" },
+        }),
       });
 
       // Mock storage.getSession then storage.putSession via runPromiseExit

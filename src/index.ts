@@ -613,7 +613,10 @@ const workerFetch = async (
       const result = await sandbox.exec(`cat "${absolutePath}"`);
       if (result.exitCode !== 0) {
         return new Response(
-          JSON.stringify({ error: "File not found or unreadable", details: result.stderr }),
+          JSON.stringify({
+            error: "File not found or unreadable",
+            details: result.stderr,
+          }),
           {
             status: 404,
             headers: { "Content-Type": "application/json" },
@@ -703,7 +706,9 @@ const workerFetch = async (
         return new Response("Forbidden: Session mismatch", { status: 403 });
       }
     } catch {
-      return new Response("Unauthorized: Invalid or expired token", { status: 401 });
+      return new Response("Unauthorized: Invalid or expired token", {
+        status: 401,
+      });
     }
 
     const id = env.REALTIME_CHANNEL.idFromName(sessionId);
