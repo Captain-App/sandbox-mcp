@@ -15,6 +15,11 @@ vi.mock("agents", () => ({
   Agent: class {},
 }));
 
+// Mock otel which uses cloudflare: protocol
+vi.mock("@microlabs/otel-cf-workers", () => ({
+  instrument: (handler: any) => handler,
+}));
+
 import worker from "./index";
 import { createMockR2Bucket } from "./test-utils/r2-mock";
 
