@@ -2,8 +2,8 @@
 import { getSandbox } from "@cloudflare/sandbox";
 import { createOpencodeServer } from "@cloudflare/sandbox/opencode";
 import type { Config } from "@opencode-ai/sdk";
-import { Effect, Option } from "effect";
-import { withSentry } from "@sentry/cloudflare";
+import { Effect, Option, pipe } from "effect";
+import { withSentry as sentryWrapper } from "@sentry/cloudflare";
 import * as Sentry from "@sentry/cloudflare";
 import { instrument } from "@microlabs/otel-cf-workers";
 
@@ -13,6 +13,7 @@ import { anthropic, createProxyHandler, createProxyToken, github, toContainerUrl
 import { makeSessionStorageLayer, SessionStorage } from "./services/session";
 import { ExecuteTaskWorkflow } from "./workflows/execute-task";
 import { ensureSandboxReady } from "./workflows/helpers/sandbox";
+import { withRequestContext, withSentry, LoggerLayer } from "@shipbox/shared";
 
 // Export Sandbox class from @cloudflare/sandbox
 export { Sandbox } from "@cloudflare/sandbox";
@@ -224,11 +225,18 @@ const workerFetch = async (
   // INTERNAL API for auth wrapper (cloud-box-castle-api)
   // List all sessions
   if (url.pathname === "/internal/sessions" && request.method === "GET") {
+    const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();
     const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const storage = yield* SessionStorage;
-        return yield* storage.listSessions();
-      }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET))),
+      pipe(
+        Effect.gen(function* () {
+          const storage = yield* SessionStorage;
+          return yield* storage.listSessions();
+        }),
+        Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)),
+        withRequestContext(requestId),
+        withSentry(Sentry as any),
+        Effect.provide(LoggerLayer),
+      ),
     );
     return new Response(JSON.stringify(result), {
       headers: { "Content-Type": "application/json" },
@@ -264,11 +272,18 @@ const workerFetch = async (
           : [],
     };
 
+    const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();
     await Effect.runPromise(
-      Effect.gen(function* () {
-        const storage = yield* SessionStorage;
-        yield* storage.putSession(session);
-      }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET))),
+      pipe(
+        Effect.gen(function* () {
+          const storage = yield* SessionStorage;
+          yield* storage.putSession(session);
+        }),
+        Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)),
+        withRequestContext(requestId, body.userId, sessionId),
+        withSentry(Sentry as any),
+        Effect.provide(LoggerLayer),
+      ),
     );
     return new Response(JSON.stringify(session), {
       status: 201,
@@ -290,12 +305,19 @@ const workerFetch = async (
       });
     }
 
+    const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();
     if (request.method === "GET") {
       const session = await Effect.runPromise(
-        Effect.gen(function* () {
-          const storage = yield* SessionStorage;
-          return yield* storage.getSession(sessionId);
-        }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET))),
+        pipe(
+          Effect.gen(function* () {
+            const storage = yield* SessionStorage;
+            return yield* storage.getSession(sessionId);
+          }),
+          Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)),
+          withRequestContext(requestId, undefined, sessionId),
+          withSentry(Sentry as any),
+          Effect.provide(LoggerLayer),
+        ),
       );
       if (session._tag === "None") return new Response("Not found", { status: 404 });
       return new Response(JSON.stringify(session.value), {
@@ -304,11 +326,18 @@ const workerFetch = async (
     }
 
     if (request.method === "DELETE") {
+      const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();
       await Effect.runPromise(
-        Effect.gen(function* () {
-          const storage = yield* SessionStorage;
-          yield* storage.deleteSession(sessionId);
-        }).pipe(Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET))),
+        pipe(
+          Effect.gen(function* () {
+            const storage = yield* SessionStorage;
+            yield* storage.deleteSession(sessionId);
+          }),
+          Effect.provide(makeSessionStorageLayer(env.SESSIONS_BUCKET)),
+          withRequestContext(requestId, undefined, sessionId),
+          withSentry(Sentry as any),
+          Effect.provide(LoggerLayer),
+        ),
       );
       return new Response(JSON.stringify({ success: true }));
     }
@@ -374,6 +403,7 @@ const workerFetch = async (
             getSessionMetadata(env.SESSIONS_BUCKET, sessionId),
           );
           if (metadata?.userId) {
+            const requestId = getRequestIdFromRequest(request) || crypto.randomUUID();
             await env.SHIPBOX_API.fetch("http://api/internal/report-usage", {
               method: "POST",
               body: JSON.stringify({
@@ -381,7 +411,10 @@ const workerFetch = async (
                 sessionId,
                 durationMs,
               }),
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "X-Request-Id": requestId,
+              },
             });
           }
         })(),
@@ -390,6 +423,9 @@ const workerFetch = async (
       return response;
     } catch (error) {
       const requestId = getRequestIdFromRequest(request);
+      Sentry.captureException(error, {
+        extra: { requestId, sessionId },
+      });
       console.error(
         JSON.stringify({
           level: "error",

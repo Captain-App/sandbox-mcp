@@ -29,7 +29,7 @@ import { OpenCodeMcpAgent } from "./mcp-agent";
 import * as Proxy from "../proxy";
 import { SessionStorage } from "../services/session";
 import { RunStorage } from "../services/run";
-import { Effect, Option } from "effect";
+import { Effect, Option, Exit } from "effect";
 
 describe("OpenCodeMcpAgent", () => {
   let agent: any;
@@ -55,6 +55,7 @@ describe("OpenCodeMcpAgent", () => {
     // Mock runtime properly AFTER init() which creates it
     agent.runtime = {
       runPromise: vi.fn(),
+      runPromiseExit: vi.fn(),
     } as any;
   });
 
@@ -74,8 +75,11 @@ describe("OpenCodeMcpAgent", () => {
 
       vi.mocked(Proxy.createProxyToken).mockReturnValue(Effect.succeed("jwt-token") as any);
 
-      // Mock storage.putSession
-      agent.runtime.runPromise.mockResolvedValueOnce(null);
+      // Mock storage.putSession via runPromiseExit
+      agent.runtime.runPromiseExit.mockResolvedValueOnce(Exit.succeed(null));
+
+      // Mock createProxyToken via runPromise
+      agent.runtime.runPromise.mockResolvedValueOnce("jwt-token");
 
       // Set userId and baseUrl from connect
       await agent.onConnect({} as any, {
@@ -102,15 +106,18 @@ describe("OpenCodeMcpAgent", () => {
         config: { defaultModel: "claude-3-5-sonnet" },
       };
 
-      // Set userId and baseUrl from connect
+      // Mock userId and baseUrl from connect
       await agent.onConnect({} as any, {
         request: new Request("https://worker.dev/mcp", { headers: { "X-User-Id": "user-123" } }),
       });
 
-      // Mock storage.getSession then storage.putSession
-      agent.runtime.runPromise
-        .mockResolvedValueOnce(Option.some(existingSession))
-        .mockResolvedValueOnce(null);
+      // Mock storage.getSession then storage.putSession via runPromiseExit
+      agent.runtime.runPromiseExit
+        .mockResolvedValueOnce(Exit.succeed(Option.some(existingSession)))
+        .mockResolvedValueOnce(Exit.succeed(null));
+
+      // Mock createProxyToken via runPromise
+      agent.runtime.runPromise.mockResolvedValueOnce("jwt-token");
 
       vi.mocked(Proxy.createProxyToken).mockReturnValue(Effect.succeed("jwt-token") as any);
 

@@ -1,5 +1,6 @@
 // src/workflows/helpers/sandbox.ts
 import { getSandbox as cfGetSandbox, type Sandbox } from "@cloudflare/sandbox";
+import * as Sentry from "@sentry/cloudflare";
 
 import { configureAnthropic, configureGithub, toContainerUrl } from "../../proxy";
 import { restoreSession } from "./backup";
@@ -64,6 +65,7 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     "grep -q ANTHROPIC_BASE_URL /workspace/.env 2>/dev/null && echo exists || echo missing",
   );
   if (proxyCheck.stdout.trim() === "missing") {
+    Sentry.addBreadcrumb({ category: "sandbox", message: "Configuring proxy", level: "info" });
     await configureSandboxProxy(sandbox, proxyBaseUrl, proxyToken);
     await setupGitConfig(sandbox);
     result.configuredProxy = true;
@@ -74,6 +76,11 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     "test -d ~/.local/share/opencode/storage && echo exists || echo missing",
   );
   if (storageCheck.stdout.trim() === "missing") {
+    Sentry.addBreadcrumb({
+      category: "sandbox",
+      message: "Restoring OpenCode backup",
+      level: "info",
+    });
     const restored = await restoreSession(sandbox, sessionId, bucket);
     result.restoredBackup = restored;
   }
@@ -87,6 +94,12 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
       `test -d ${targetDir}/.git && echo exists || echo missing`,
     );
     if (repoCheck.stdout.trim() === "missing") {
+      Sentry.addBreadcrumb({
+        category: "sandbox",
+        message: "Cloning repository",
+        level: "info",
+        data: { url: repository.url },
+      });
       await cloneRepository(sandbox, repository.url, repository.branch);
       result.clonedRepo = true;
     }

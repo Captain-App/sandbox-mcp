@@ -17,7 +17,12 @@ import {
   DEFAULT_MODEL,
   SessionId,
   type SessionMetadata,
+  withRequestContext,
+  withSentry,
+  LoggerLayer,
+  captureEffectError,
 } from "@shipbox/shared";
+import { pipe } from "effect";
 import { createProxyToken } from "../proxy";
 import { makeRunStorageLayer, RunStorage } from "../services/run";
 import { makeSessionStorageLayer, SessionStorage } from "../services/session";
@@ -282,14 +287,29 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             telemetry.endPhase("validate");
             telemetry.startPhase("storage");
 
-            const existing = await rt.runPromise(
-              Effect.gen(function* () {
-                const sessionStorage = yield* SessionStorage;
-                return yield* sessionStorage.getSession(params.sessionId as string);
-              }),
+            const existing = await rt.runPromiseExit(
+              pipe(
+                Effect.gen(function* () {
+                  const sessionStorage = yield* SessionStorage;
+                  return yield* sessionStorage.getSession(params.sessionId as string);
+                }),
+                withRequestContext(this.getRequestId(), this.userId || undefined, params.sessionId),
+                withSentry(Sentry as any),
+                Effect.provide(LoggerLayer),
+              ),
             );
 
-            if (existing._tag === "None") {
+            if (existing._tag === "Failure") {
+              captureEffectError(existing.cause, Sentry as any, {
+                sessionId: params.sessionId,
+                tool: "opencode_run_task",
+              });
+              const error = formatDomainError(existing.cause);
+              this.emitToolTelemetry(telemetry, false);
+              return error;
+            }
+
+            if (existing.value._tag === "None") {
               const error = new SessionNotFoundError({ sessionId: params.sessionId });
               telemetry.setError({
                 type: error._tag,
@@ -300,7 +320,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               this.emitToolTelemetry(telemetry, false);
               return formatDomainError(error);
             }
-            session = existing.value;
+            session = existing.value.value;
           } else {
             // Create new session
             isNewSession = true;
@@ -317,6 +337,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               status: "active",
               workspacePath: "/workspace",
               webUiUrl: this.getWebUiUrl(sessionId),
+              userId: this.getUserId(), // Capture userId in session
               repository: params.repository
                 ? {
                     url: params.repository,
@@ -333,12 +354,25 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             telemetry.startPhase("storage");
 
             // Save new session to R2
-            await rt.runPromise(
-              Effect.gen(function* () {
-                const sessionStorage = yield* SessionStorage;
-                yield* sessionStorage.putSession(session);
-              }),
+            const result = await rt.runPromiseExit(
+              pipe(
+                Effect.gen(function* () {
+                  const sessionStorage = yield* SessionStorage;
+                  yield* sessionStorage.putSession(session);
+                }),
+                withRequestContext(this.getRequestId(), this.userId || undefined, sessionId),
+                withSentry(Sentry as any),
+                Effect.provide(LoggerLayer),
+              ),
             );
+
+            if (result._tag === "Failure") {
+              captureEffectError(result.cause, Sentry as any, {
+                sessionId,
+                userId: session.userId,
+                tool: "opencode_run_task",
+              });
+            }
           }
 
           // 2. Check if additional repo needs cloning
@@ -426,6 +460,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             webUiUrl: session.webUiUrl,
           });
         } catch (error) {
+          Sentry.captureException(error, {
+            extra: { params, tool: "opencode_run_task" },
+          });
           const errorName = error instanceof Error ? error.name : "UnknownError";
           const errorMessage = error instanceof Error ? error.message : String(error);
           telemetry.setError({
@@ -503,6 +540,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             webUiUrl: session._tag === "Some" ? session.value.webUiUrl : undefined,
           });
         } catch (error) {
+          Sentry.captureException(error, {
+            extra: { params, tool: "opencode_get_result" },
+          });
           const errorName = error instanceof Error ? error.name : "UnknownError";
           const errorMessage = error instanceof Error ? error.message : String(error);
           telemetry.setError({
@@ -570,6 +610,9 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
             hasMore,
           });
         } catch (error) {
+          Sentry.captureException(error, {
+            extra: { params, tool: "opencode_list_runs" },
+          });
           const errorName = error instanceof Error ? error.name : "UnknownError";
           const errorMessage = error instanceof Error ? error.message : String(error);
           telemetry.setError({
