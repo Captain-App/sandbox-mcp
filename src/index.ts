@@ -240,7 +240,7 @@ const workerFetch = async (
     const body = (await request.json()) as any;
     const sessionId = crypto.randomUUID().slice(0, 8) as any;
     const now = Date.now();
-    const session = {
+    const session: SessionMetadata = {
       sessionId,
       sandboxId: sessionId,
       createdAt: now,
@@ -249,15 +249,19 @@ const workerFetch = async (
       workspacePath: "/workspace",
       webUiUrl: `${url.protocol}//${url.host}/session/${sessionId}/`,
       userId: body.userId,
-      repository: body.repository
-        ? { url: body.repository, branch: body.branch ?? "main" }
-        : undefined,
+      repository:
+        body.repository && typeof body.repository === "string" && body.repository.trim() !== ""
+          ? { url: body.repository, branch: body.branch ?? "main" }
+          : undefined,
       title: body.name || body.title,
       config: {
         defaultModel: body.model || "claude-sonnet-4-5",
         region: body.region || "lhr",
       },
-      clonedRepos: body.repository ? [body.repository] : [],
+      clonedRepos:
+        body.repository && typeof body.repository === "string" && body.repository.trim() !== ""
+          ? [body.repository]
+          : [],
     };
 
     await Effect.runPromise(
