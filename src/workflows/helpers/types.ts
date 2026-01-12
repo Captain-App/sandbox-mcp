@@ -29,6 +29,10 @@ export interface TaskParams {
    */
   proxyBaseUrl: string;
   /**
+   * User ID of the owner.
+   */
+  userId: string;
+  /**
    * Request ID for correlation across services.
    */
   requestId: string;

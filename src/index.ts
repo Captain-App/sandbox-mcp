@@ -129,6 +129,20 @@ async function proxyToSandbox(
   // Get session metadata to know repository info and userId
   const metadata = await Effect.runPromise(getSessionMetadata(env.SESSIONS_BUCKET, sessionId));
 
+  // Pre-flight balance check
+  if (metadata?.userId) {
+    const balanceRes = await env.SHIPBOX_API.fetch(
+      `http://api/internal/check-balance/${metadata.userId}`,
+    );
+    if (!balanceRes.ok) {
+      const errorData = (await balanceRes.json()) as any;
+      return new Response(JSON.stringify({ error: errorData.error || "Insufficient balance" }), {
+        status: 402,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   // Create a short-lived proxy token for web UI access
   const proxyToken = await Effect.runPromise(
     createProxyToken({

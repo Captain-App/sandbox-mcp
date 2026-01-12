@@ -56,6 +56,18 @@ export class ExecuteTaskWorkflow extends WorkflowEntrypoint<Env, TaskParams> {
     );
 
     try {
+      // Step 0: Pre-flight balance check
+      await step.do("check-balance", async () => {
+        const balanceRes = await this.env.SHIPBOX_API.fetch(
+          `http://api/internal/check-balance/${params.userId}`,
+        );
+        if (!balanceRes.ok) {
+          const errorData = (await balanceRes.json()) as any;
+          throw new Error(errorData.error || "Insufficient balance");
+        }
+        return { ok: true };
+      });
+
       // Step 1: Create run record in R2 (doesn't need sandbox)
       await step.do("create-run", async () => {
         const run: RunRecord = {

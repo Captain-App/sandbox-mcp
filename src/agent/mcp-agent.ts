@@ -389,6 +389,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
               existingOpencodeSessionId: session.opencodeSessionId,
               proxyToken,
               proxyBaseUrl: this.getBaseUrl(),
+              userId: this.getUserId(),
               requestId: this.getRequestId(),
             },
           });

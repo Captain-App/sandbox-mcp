@@ -51,6 +51,12 @@ describe("ExecuteTaskWorkflow", () => {
     mockEnv = {
       Sandbox: {},
       SESSIONS_BUCKET: {},
+      SHIPBOX_API: {
+        fetch: vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ ok: true }),
+        }),
+      },
     };
 
     // Instantiate workflow (mocking the base class if necessary, but here we just call run)
@@ -72,6 +78,8 @@ describe("ExecuteTaskWorkflow", () => {
         runId: "run-456",
         sessionId: "sess-789",
         sandboxId: "sb-101",
+        userId: "user-123",
+        requestId: "req-123",
         task: "do stuff",
         proxyBaseUrl: "https://proxy",
         proxyToken: "jwt",
