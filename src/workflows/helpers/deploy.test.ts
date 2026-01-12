@@ -41,7 +41,7 @@ describe("Deploy Helper", () => {
 
     expect(result.success).toBe(true);
     expect(result.workerName).toBe("sandbox-sess-123");
-    expect(result.url).toBe("https://sandbox-sess-123.ns-123.workers.dev");
+    expect(result.url).toBe("https://engine.shipbox.dev/site/sess-123/");
 
     // Verify esbuild command
     expect(mockSandbox.exec).toHaveBeenCalledWith(

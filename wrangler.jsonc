@@ -5,7 +5,8 @@
 	"compatibility_date": "2025-05-06",
 	"compatibility_flags": ["nodejs_compat"],
 	"routes": [
-		{ "pattern": "engine.shipbox.dev/*", "zone_name": "shipbox.dev" }
+		{ "pattern": "engine.shipbox.dev/*", "zone_name": "shipbox.dev" },
+		{ "pattern": "*.preview.shipbox.dev/*", "zone_name": "shipbox.dev" }
 	],
 
 	"observability": {
@@ -18,7 +19,7 @@
 		{
 			"class_name": "Sandbox",
 			"image": "./Dockerfile",
-			"instance_type": "standard",
+			"instance_type": "standard-1",
 			"max_instances": 10
 		}
 	],
@@ -29,6 +30,10 @@
 			{
 				"name": "MCP_AGENT",
 				"class_name": "OpenCodeMcpAgent"
+			},
+			{
+				"name": "REALTIME_CHANNEL",
+				"class_name": "RealtimeChannel"
 			},
 			{
 				"name": "Sandbox",
@@ -42,6 +47,10 @@
 		{
 			"tag": "v1",
 			"new_sqlite_classes": ["OpenCodeMcpAgent", "Sandbox"]
+		},
+		{
+			"tag": "v2",
+			"new_sqlite_classes": ["RealtimeChannel"]
 		}
 	],
 

@@ -227,8 +227,21 @@ async function configureSandboxProxy(
   proxyToken: string,
 ): Promise<void> {
   const containerProxyUrl = toContainerUrl(proxyBaseUrl);
+
   await configureAnthropic(sandbox, containerProxyUrl, proxyToken);
   await configureGithub(sandbox, containerProxyUrl, proxyToken);
+
+  // Log what was actually written to .env using logged command
+  await loggedExec(sandbox, bucket, sessionId, "cat /workspace/.env", "Env file contents");
+
+  // Test connectivity to the proxy URL
+  await loggedExec(
+    sandbox,
+    bucket,
+    sessionId,
+    `curl -s -o /dev/null -w '%{http_code}' ${containerProxyUrl}/health`,
+    "Proxy connectivity test",
+  );
 }
 
 /**

@@ -4,7 +4,7 @@
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
-		durableNamespaces: "OpenCodeMcpAgent" | "Sandbox";
+		durableNamespaces: "OpenCodeMcpAgent" | "RealtimeChannel" | "Sandbox";
 	}
 	interface Env {
 		ENVIRONMENT: "development";
@@ -12,6 +12,7 @@ declare namespace Cloudflare {
 		ANTHROPIC_API_KEY: string;
 		GITHUB_TOKEN: string;
 		MCP_AGENT: DurableObjectNamespace<import("./src/index").OpenCodeMcpAgent>;
+		REALTIME_CHANNEL: DurableObjectNamespace<import("./src/index").RealtimeChannel>;
 		Sandbox: DurableObjectNamespace<import("./src/index").Sandbox>;
 		SESSIONS_BUCKET: R2Bucket;
 		EXECUTE_TASK_WORKFLOW: Workflow<Parameters<import("./src/index").ExecuteTaskWorkflow['run']>[0]['payload']>;
@@ -20,6 +21,11 @@ declare namespace Cloudflare {
 		HONEYCOMB_API_KEY?: string;
 		HONEYCOMB_DATASET?: string;
 		METRICS: AnalyticsEngineDataset;
+		// Workers for Platforms dispatch namespace for deployed sandbox workers
+		SANDBOX_WORKERS?: DispatchNamespace;
+		CLOUDFLARE_ACCOUNT_ID?: string;
+		CLOUDFLARE_API_TOKEN?: string;
+		CLOUDFLARE_DISPATCH_NAMESPACE?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

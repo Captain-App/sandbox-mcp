@@ -91,11 +91,10 @@ export async function deployWorker(
       };
     }
 
-    // Construct the production URL
-    // This depends on the dispatcher worker's configuration.
-    // Assuming the dispatcher is at sandbox-mcp-dispatcher.you.workers.dev
-    // and it routes based on the name or a path.
-    const url = `https://${workerName}.${dispatchNamespace}.workers.dev`; // Example pattern
+    // Construct the production URL using the engine's /site/ route
+    // The engine routes /site/{sessionId}/* to the deployed worker in Workers for Platforms
+    // Wildcard subdomain {sessionId}.preview.shipbox.dev is also configured as a backup
+    const url = `https://engine.shipbox.dev/site/${sessionId}/`;
 
     return {
       success: true,

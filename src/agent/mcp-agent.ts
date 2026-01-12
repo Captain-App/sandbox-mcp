@@ -195,8 +195,17 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
    */
   override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     // Extract and cache the base URL from the connection request
+    // Use engine URL if we're being called via:
+    // - Service binding (hostname is "sandbox")
+    // - Internal workers URL
+    // - API proxy (backend.shipbox.dev) - needs engine URL for proxy routes
     const url = new URL(ctx.request.url);
-    this.baseUrl = `${url.protocol}//${url.host}`;
+    const needsEngineUrl =
+      url.hostname === "sandbox" ||
+      url.hostname.includes("workers.internal") ||
+      url.hostname === "localhost" ||
+      url.hostname === "backend.shipbox.dev";
+    this.baseUrl = needsEngineUrl ? "https://engine.shipbox.dev" : `${url.protocol}//${url.host}`;
 
     // Extract user ID from header injected by shipbox-api
     this.userId = ctx.request.headers.get("X-User-Id");
@@ -694,6 +703,22 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
           const result = await Miniflare.startMiniflare(sandbox, params.workerPath, port);
 
           telemetry.endPhase("sandbox");
+
+          // Check if miniflare failed to start
+          if (!result.success) {
+            telemetry.setError({
+              type: "MiniflareStartupError",
+              code: "MINIFLARE_STARTUP_FAILED",
+              message: result.error || "Miniflare failed to start",
+              retriable: true,
+            });
+            this.emitToolTelemetry(telemetry, false);
+            return formatToolResponse({
+              success: false,
+              error: result.error || "Miniflare failed to start",
+              logPath: result.logPath,
+            });
+          }
 
           const previewUrl = `${this.getBaseUrl()}/preview/${session.sessionId}${
             port === 8787 ? "" : `:${port}`

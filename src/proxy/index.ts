@@ -16,7 +16,7 @@ export { createProxyHandler } from "./handler";
 export { anthropic, cloudflare, configureAnthropic, configureGithub, github } from "./services";
 
 // Token (Effect-native)
-export { createProxyToken } from "./token";
+export { createProxyToken, verifyProxyTokenAsync } from "./token";
 
 // URL utilities
 export { toContainerUrl } from "./url";

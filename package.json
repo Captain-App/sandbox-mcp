@@ -21,7 +21,6 @@
 	},
 	"dependencies": {
 		"@cloudflare/sandbox": "^0.6.7",
-		"@microlabs/otel-cf-workers": "^1.0.0-rc.52",
 		"@modelcontextprotocol/sdk": "^1.23.0",
 		"@opencode-ai/sdk": "^1.0.184",
 		"@sentry/cloudflare": "^10.32.1",

@@ -1,7 +1,48 @@
 // src/workflows/helpers/opencode.ts
 import type { Sandbox } from "@cloudflare/sandbox";
-import { createOpencode } from "@cloudflare/sandbox/opencode";
+import { createOpencode, type OpencodeServer } from "@cloudflare/sandbox/opencode";
 import type { Config, OpencodeClient } from "@opencode-ai/sdk";
+
+/**
+ * Forward an event to the RealtimeChannel DO
+ */
+async function publishToRealtime(proxyBaseUrl: string, sessionId: string, type: string, data: any) {
+  try {
+    const url = `${proxyBaseUrl}/internal/realtime/${sessionId}/publish`;
+    await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ type, data }),
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error(`Failed to publish realtime event for ${sessionId}:`, e);
+  }
+}
+
+/**
+ * Filter events to forward to the frontend
+ */
+function shouldForwardEvent(event: any): boolean {
+  const relevantTypes = [
+    "session.status",
+    "session.idle",
+    "session.error",
+    "message.part.updated",
+    "message.updated",
+    "text",
+    "reasoning",
+    "tool",
+    "step-start",
+    "step-finish",
+    "file.edited",
+    "command.executed",
+    "todo.updated",
+    "busy",
+    "idle",
+    "retry",
+  ];
+  return relevantTypes.includes(event.type);
+}
 
 import { toContainerUrl } from "../../proxy";
 import type {
@@ -13,6 +54,37 @@ import type {
   OpenCodeTaskResult,
   TaskParams,
 } from "./types";
+
+// Diagnostic logging helper
+function log(phase: string, message: string, data?: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({
+      level: "info",
+      type: "opencode.diagnostic",
+      phase,
+      message,
+      ...data,
+      timestamp: new Date().toISOString(),
+    }),
+  );
+}
+
+function logError(phase: string, message: string, error: unknown, data?: Record<string, unknown>) {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      type: "opencode.diagnostic",
+      phase,
+      message,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : String(error),
+      ...data,
+      timestamp: new Date().toISOString(),
+    }),
+  );
+}
 
 /**
  * Extract text output from OpenCode response parts.
@@ -36,6 +108,36 @@ function extractTextOutput(parts: OpenCodePart[]): string {
  */
 function enhanceTask(task: string): string {
   return `${task}
+
+## IMPORTANT: Maintain a PLAN.md
+
+Throughout your work, maintain a file called \`PLAN.md\` in the workspace root.
+Update it as you work to reflect:
+- Current objective
+- Steps completed (with checkmarks)
+- Current step in progress
+- Next steps planned
+- Any blockers or decisions needed
+
+Example format:
+\`\`\`markdown
+# Plan
+
+## Objective
+Build a landing page with hero section
+
+## Progress
+- [x] Created project structure
+- [x] Added Tailwind CSS
+- [ ] **Building hero component** <- current
+- [ ] Add feature cards
+- [ ] Deploy to preview
+
+## Notes
+Using React + Vite for fast iteration
+\`\`\`
+
+Update PLAN.md frequently so users can follow your progress in real-time.
 
 When you're done, please summarize:
 - What you accomplished
@@ -78,6 +180,11 @@ interface ExecuteTaskResult {
  * Starts OpenCode server with proxy configuration, creates/gets session,
  * and executes the task. All API calls go through the proxy.
  *
+ * IMPORTANT: The server is NOT closed after task execution. This is intentional
+ * because OpenCode tracks shell command processes internally, and closing the
+ * server would orphan those processes and cause CommandNotFoundError.
+ * The server will be reused on subsequent calls (SDK handles this).
+ *
  * @param sandbox - The sandbox instance
  * @param params - Task parameters (including optional existingOpencodeSessionId)
  * @param workingDirectory - The directory to run OpenCode in (e.g., /workspace/repo)
@@ -88,47 +195,129 @@ export async function executeTask(
   params: TaskParams,
   workingDirectory: string,
 ): Promise<ExecuteTaskResult> {
-  // Build proxy-based config
-  const config = buildProxyConfig(params.proxyBaseUrl, params.proxyToken);
-
-  // Start OpenCode server in the sandbox and get SDK client
-  const { client, server } = await createOpencode<OpencodeClient>(sandbox, {
-    port: 4096,
-    directory: workingDirectory,
-    config,
+  const taskId = crypto.randomUUID().slice(0, 8);
+  log("executeTask.start", "Starting OpenCode task execution", {
+    taskId,
+    sessionId: params.sessionId,
+    sandboxId: params.sandboxId,
+    workingDirectory,
+    existingOpencodeSessionId: params.existingOpencodeSessionId,
+    model: params.model,
   });
 
+  // Build proxy-based config
+  const config = buildProxyConfig(params.proxyBaseUrl, params.proxyToken);
+  log("executeTask.config", "Built proxy config", {
+    taskId,
+    proxyBaseUrl: params.proxyBaseUrl,
+    containerProxyUrl: toContainerUrl(params.proxyBaseUrl),
+  });
+
+  let server: OpencodeServer | null = null;
+  let client: OpencodeClient | null = null;
+
   try {
+    // Start OpenCode server in the sandbox and get SDK client
+    log("executeTask.createOpencode", "Creating OpenCode server and client", { taskId });
+    const result = await createOpencode<OpencodeClient>(sandbox, {
+      port: 4096,
+      directory: workingDirectory,
+      config,
+    });
+    server = result.server;
+    client = result.client;
+
+    log("executeTask.serverReady", "OpenCode server ready", {
+      taskId,
+      serverPort: server.port,
+      serverUrl: server.url,
+    });
+
     let opencodeSessionId: string;
 
     // Check if we should continue an existing OpenCode session
     if (params.existingOpencodeSessionId) {
       // Use the existing session for continuation
       opencodeSessionId = params.existingOpencodeSessionId;
+      log("executeTask.reuseSession", "Using existing OpenCode session", {
+        taskId,
+        opencodeSessionId,
+      });
     } else {
       // Try to list existing sessions with proper directory context
+      log("executeTask.listSessions", "Listing existing sessions", { taskId, workingDirectory });
       const existingSessions = (await client.session.list({
         query: { directory: workingDirectory },
       })) as OpenCodeSessionListResponse;
 
+      log("executeTask.listSessionsResult", "Listed sessions", {
+        taskId,
+        sessionCount: existingSessions.data?.length ?? 0,
+        sessionIds: existingSessions.data?.map((s) => s.id),
+      });
+
       if (existingSessions.data && existingSessions.data.length > 0) {
         // Use the first existing session
         opencodeSessionId = existingSessions.data[0].id;
+        log("executeTask.useExisting", "Using first existing session", {
+          taskId,
+          opencodeSessionId,
+        });
       } else {
         // Create a new session with directory context (no title - let OpenCode auto-generate)
+        log("executeTask.createSession", "Creating new session", { taskId, workingDirectory });
         const created = (await client.session.create({
           query: { directory: workingDirectory },
         })) as OpenCodeSessionCreateResponse;
 
         if (!created.data?.id) {
-          throw new Error("Failed to create OpenCode session: no ID returned");
+          const error = new Error("Failed to create OpenCode session: no ID returned");
+          logError("executeTask.createSessionFailed", "No session ID in response", error, {
+            taskId,
+            response: created,
+          });
+          throw error;
         }
         opencodeSessionId = created.data.id;
+        log("executeTask.sessionCreated", "New session created", {
+          taskId,
+          opencodeSessionId,
+        });
       }
     }
 
+    // Start event bridge
+    const abortController = new AbortController();
+    const eventPromise = (async () => {
+      try {
+        const { stream } = await client!.global.event({
+          signal: abortController.signal,
+        } as any);
+        for await (const event of stream as any) {
+          if (shouldForwardEvent(event)) {
+            // Forward to DO via proxy
+            await publishToRealtime(
+              params.proxyBaseUrl,
+              params.sessionId,
+              event.type,
+              event.properties || event,
+            );
+          }
+        }
+      } catch {
+        // Stop silently on abort or connection error
+      }
+    })();
+
     // Execute the task with enhanced prompt for better output
     const enhancedTask = enhanceTask(params.task);
+    log("executeTask.prompt", "Sending prompt to OpenCode", {
+      taskId,
+      opencodeSessionId,
+      model: params.model,
+      taskLength: params.task.length,
+      enhancedTaskLength: enhancedTask.length,
+    });
 
     const response = (await client.session.prompt({
       path: { id: opencodeSessionId },
@@ -147,21 +336,49 @@ export async function executeTask(
       },
     })) as OpenCodePromptResponse;
 
+    // End event bridge
+    abortController.abort();
+    await eventPromise;
+
+    log("executeTask.promptComplete", "Received response from OpenCode", {
+      taskId,
+      opencodeSessionId,
+      hasData: !!response?.data,
+      partsCount: response?.data?.parts?.length ?? 0,
+      tokens: response?.data?.info?.tokens,
+      finish: response?.data?.info?.finish,
+      hasError: !!response?.data?.info?.error,
+    });
+
     // Extract text output from response
     const output = extractTextOutput(response?.data?.parts ?? []);
 
     // Check for errors in the response
     if (response?.data?.info?.error) {
+      const errorInfo = response.data.info.error;
+      logError("executeTask.promptError", "OpenCode returned error in response", errorInfo, {
+        taskId,
+        opencodeSessionId,
+        errorName: errorInfo.name,
+        errorMessage: errorInfo.data.message,
+      });
       return {
         result: {
           success: false,
           output,
-          error: response.data.info.error.data.message,
+          error: errorInfo.data.message,
           tokens: response.data.info.tokens,
         },
         opencodeSessionId,
       };
     }
+
+    log("executeTask.success", "Task completed successfully", {
+      taskId,
+      opencodeSessionId,
+      outputLength: output.length,
+      tokens: response?.data?.info?.tokens,
+    });
 
     return {
       result: {
@@ -172,6 +389,11 @@ export async function executeTask(
       opencodeSessionId,
     };
   } catch (error) {
+    logError("executeTask.error", "Task execution failed", error, {
+      taskId,
+      existingOpencodeSessionId: params.existingOpencodeSessionId,
+    });
+
     // Return a failed result but still need to return some session ID
     // In case of error, we may not have a valid session ID
     return {
@@ -182,15 +404,19 @@ export async function executeTask(
       },
       opencodeSessionId: params.existingOpencodeSessionId ?? "unknown",
     };
-  } finally {
-    // Always close the server
-    await server.close();
   }
+  // NOTE: We intentionally do NOT close the server here.
+  // The OpenCode server tracks shell command processes internally.
+  // Closing the server would orphan those processes and cause CommandNotFoundError.
+  // The SDK's ensureOpencodeServer() reuses existing servers on the same port.
 }
 
 /**
  * Get the title of an OpenCode session.
  * OpenCode auto-generates titles based on the conversation.
+ *
+ * IMPORTANT: The server is NOT closed after getting the title. This is intentional
+ * to maintain process tracking consistency with executeTask().
  *
  * @param sandbox - The sandbox instance
  * @param opencodeSessionId - The OpenCode session ID
@@ -206,23 +432,37 @@ export async function getSessionTitle(
   proxyToken: string,
   workingDirectory: string,
 ): Promise<string> {
-  const config = buildProxyConfig(proxyBaseUrl, proxyToken);
-
-  const { client, server } = await createOpencode<OpencodeClient>(sandbox, {
-    port: 4096,
-    directory: workingDirectory,
-    config,
+  log("getSessionTitle.start", "Getting session title", {
+    opencodeSessionId,
+    workingDirectory,
   });
 
+  const config = buildProxyConfig(proxyBaseUrl, proxyToken);
+
   try {
+    const { client } = await createOpencode<OpencodeClient>(sandbox, {
+      port: 4096,
+      directory: workingDirectory,
+      config,
+    });
+
     const session = (await client.session.get({
       path: { id: opencodeSessionId },
     })) as OpenCodeSessionGetResponse;
 
-    return session.data?.title ?? "Untitled";
-  } catch {
+    const title = session.data?.title ?? "Untitled";
+    log("getSessionTitle.success", "Got session title", {
+      opencodeSessionId,
+      title,
+    });
+
+    return title;
+  } catch (error) {
+    logError("getSessionTitle.error", "Failed to get session title", error, {
+      opencodeSessionId,
+    });
     return "Untitled";
-  } finally {
-    await server.close();
   }
+  // NOTE: We intentionally do NOT close the server here.
+  // The SDK reuses existing servers on the same port.
 }
