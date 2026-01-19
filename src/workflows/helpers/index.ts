@@ -6,3 +6,4 @@ export * as Run from "./run";
 export * as Sandbox from "./sandbox";
 export * as Miniflare from "./miniflare";
 export * as Deploy from "./deploy";
+export * as DeployPages from "./deploy-pages";

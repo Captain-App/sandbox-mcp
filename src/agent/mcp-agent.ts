@@ -27,7 +27,7 @@ import { createProxyToken } from "../proxy";
 import { makeRunStorageLayer, RunStorage } from "../services/run";
 import { makeSessionStorageLayer, SessionStorage } from "../services/session";
 import { ToolCallEventBuilder } from "../services/telemetry";
-import { Miniflare, Deploy, Sandbox as SandboxHelper } from "../workflows/helpers";
+import { Miniflare, Deploy, DeployPages, Sandbox as SandboxHelper } from "../workflows/helpers";
 import {
   formatErrorResponse,
   formatToolResponse,
@@ -35,11 +35,13 @@ import {
   listRunsInputSchema,
   previewWorkerInputSchema,
   deployWorkerInputSchema,
+  deployPagesInputSchema,
   runTaskInputSchema,
   type GetResultInput,
   type ListRunsInput,
   type PreviewWorkerInput,
   type DeployWorkerInput,
+  type DeployPagesInput,
   type RunTaskInput,
 } from "./tools";
 
@@ -159,6 +161,7 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
     this.registerListRunsTool();
     this.registerPreviewWorkerTool();
     this.registerDeployWorkerTool();
+    this.registerDeployPagesTool();
 
     this.setState({ initialized: true });
   }
@@ -858,6 +861,122 @@ export class OpenCodeMcpAgent extends McpAgent<Env, AgentState> {
         } catch (error) {
           Sentry.captureException(error, {
             extra: { params, tool: "opencode_deploy_worker" },
+          });
+          const errorName = error instanceof Error ? error.name : "UnknownError";
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          telemetry.setError({
+            type: errorName,
+            code: errorName,
+            message: errorMessage,
+            retriable: false,
+          });
+          this.emitToolTelemetry(telemetry, false);
+          return formatDomainError(error);
+        }
+      },
+    );
+  }
+
+  /**
+   * Tool: opencode_deploy_pages
+   * Deploy a static site to Cloudflare Pages.
+   */
+  private registerDeployPagesTool(): void {
+    this.server.registerTool(
+      "opencode_deploy_pages",
+      {
+        description: `Deploy a static site to Cloudflare Pages from your sandbox workspace.
+
+IMPORTANT: Build your site first (e.g., npm run build) before deploying.
+
+The tool will:
+- Deploy files from the specified directory to Cloudflare Pages
+- Create/reuse project named "sandbox-{userId}-{projectName}"
+- Return a live URL at https://{projectName}.pages.dev
+
+PARAMETERS:
+- directory (required): Path to pre-built assets (e.g., "dist", "build")
+- projectName (optional): Lowercase slug for your project (defaults to "default-{sessionId}")
+- branch (optional): Branch name, defaults to "main" (production)`,
+        inputSchema: deployPagesInputSchema,
+      },
+      async (params: DeployPagesInput) => {
+        const telemetry = new ToolCallEventBuilder("opencode_deploy_pages", this.getRequestId());
+        telemetry.startPhase("validate");
+
+        if (!params.sessionId) {
+          return formatErrorResponse({
+            code: "MISSING_SESSION_ID",
+            message: "sessionId is required for deploy_pages.",
+          });
+        }
+
+        try {
+          const rt = getRuntime(this.runtime);
+
+          // 1. Get session to verify it exists
+          const sessionResult = await rt.runPromiseExit(
+            pipe(
+              Effect.gen(function* () {
+                const sessionStorage = yield* SessionStorage;
+                return yield* sessionStorage.getSession(params.sessionId!);
+              }),
+              withRequestContext(this.getRequestId(), this.userId || undefined, params.sessionId),
+            ),
+          );
+
+          if (sessionResult._tag === "Failure" || sessionResult.value._tag === "None") {
+            return formatErrorResponse({
+              code: "SESSION_NOT_FOUND",
+              message: `Session ${params.sessionId} not found.`,
+            });
+          }
+
+          const session = sessionResult.value.value;
+
+          telemetry.endPhase("validate");
+          telemetry.startPhase("deploy");
+
+          // 2. Get sandbox and deploy
+          const sandbox = SandboxHelper.getSandbox(
+            {
+              sandboxBinding: this.env.Sandbox,
+              sessionsBucket: this.env.SESSIONS_BUCKET,
+            },
+            session.sandboxId,
+          );
+
+          const result = await DeployPages.deployPages({
+            sandbox,
+            sessionId: session.sessionId,
+            directory: params.directory,
+            projectName: params.projectName,
+            branch: params.branch,
+            userId: session.userId || this.getUserId(),
+            accountId: (this.env as any).CLOUDFLARE_ACCOUNT_ID,
+            apiToken: (this.env as any).CLOUDFLARE_API_TOKEN,
+          });
+
+          telemetry.endPhase("deploy");
+
+          if (!result.success) {
+            this.emitToolTelemetry(telemetry, false);
+            return formatErrorResponse({
+              code: "DEPLOYMENT_FAILED",
+              message: result.error || "Unknown deployment error",
+            });
+          }
+
+          this.emitToolTelemetry(telemetry, true);
+
+          return formatToolResponse({
+            success: true,
+            projectName: result.projectName,
+            url: result.url,
+          });
+        } catch (error) {
+          Sentry.captureException(error, {
+            extra: { params, tool: "opencode_deploy_pages" },
           });
           const errorName = error instanceof Error ? error.name : "UnknownError";
           const errorMessage = error instanceof Error ? error.message : String(error);

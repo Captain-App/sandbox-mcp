@@ -98,6 +98,32 @@ export const deployWorkerInputSchema = z.object({
 export type DeployWorkerInput = z.infer<typeof deployWorkerInputSchema>;
 
 /**
+ * Schema for deploy_pages tool input
+ */
+export const deployPagesInputSchema = z.object({
+  sessionId: z.string().optional().describe("Session ID to deploy from."),
+
+  directory: z
+    .string()
+    .describe("Directory containing pre-built static assets (e.g., 'dist', 'build', 'out')."),
+
+  projectName: z
+    .string()
+    .regex(/^[a-z0-9-]+$/)
+    .optional()
+    .describe(
+      "Project slug (lowercase, alphanumeric, hyphens). Defaults to 'default-{sessionId}'.",
+    ),
+
+  branch: z
+    .string()
+    .optional()
+    .default("main")
+    .describe("Branch name for deployment. Defaults to 'main' (production)."),
+});
+export type DeployPagesInput = z.infer<typeof deployPagesInputSchema>;
+
+/**
  * MCP tool response type - uses index signature for SDK compatibility
  */
 interface ToolResponse {

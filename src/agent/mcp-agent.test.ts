@@ -32,6 +32,9 @@ vi.mock("../workflows/helpers", () => ({
   Deploy: {
     deployWorker: vi.fn(),
   },
+  DeployPages: {
+    deployPages: vi.fn(),
+  },
   Sandbox: {
     getSandbox: vi.fn().mockReturnValue({}),
   },
@@ -70,13 +73,14 @@ describe("OpenCodeMcpAgent", () => {
   });
 
   it("should register tools on init", () => {
-    expect(agent.server.registerTool).toHaveBeenCalledTimes(5);
+    expect(agent.server.registerTool).toHaveBeenCalledTimes(6);
     const tools = agent.server.registerTool.mock.calls.map((c: any) => c[0]);
     expect(tools).toContain("opencode_run_task");
     expect(tools).toContain("opencode_get_result");
     expect(tools).toContain("opencode_list_runs");
     expect(tools).toContain("opencode_preview_worker");
     expect(tools).toContain("opencode_deploy_worker");
+    expect(tools).toContain("opencode_deploy_pages");
   });
 
   describe("opencode_run_task", () => {
