@@ -722,7 +722,14 @@ const workerFetch = async (
     const sessionId = realtimePublishMatch[1];
     const id = env.REALTIME_CHANNEL.idFromName(sessionId);
     const stub = env.REALTIME_CHANNEL.get(id);
-    return stub.fetch(request);
+    // Rewrite URL to /publish for the DO (it expects requests at /publish, not the full path)
+    const rewrittenUrl = new URL("/publish", url.origin);
+    const rewrittenRequest = new Request(rewrittenUrl.toString(), {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+    });
+    return stub.fetch(rewrittenRequest);
   }
 
   // Web UI entry point - /session/{sessionId} sets cookie and redirects to OpenCode

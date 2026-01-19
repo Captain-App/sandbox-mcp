@@ -9,39 +9,18 @@ import type { Config, OpencodeClient } from "@opencode-ai/sdk";
 async function publishToRealtime(proxyBaseUrl: string, sessionId: string, type: string, data: any) {
   try {
     const url = `${proxyBaseUrl}/internal/realtime/${sessionId}/publish`;
-    await fetch(url, {
+    console.log(`[Realtime] Publishing event type=${type} to ${url}`);
+    const res = await fetch(url, {
       method: "POST",
       body: JSON.stringify({ type, data }),
       headers: { "Content-Type": "application/json" },
     });
+    if (!res.ok) {
+      console.error(`[Realtime] Publish failed: ${res.status} ${await res.text()}`);
+    }
   } catch (e) {
-    console.error(`Failed to publish realtime event for ${sessionId}:`, e);
+    console.error(`[Realtime] Failed to publish event for ${sessionId}:`, e);
   }
-}
-
-/**
- * Filter events to forward to the frontend
- */
-function shouldForwardEvent(event: any): boolean {
-  const relevantTypes = [
-    "session.status",
-    "session.idle",
-    "session.error",
-    "message.part.updated",
-    "message.updated",
-    "text",
-    "reasoning",
-    "tool",
-    "step-start",
-    "step-finish",
-    "file.edited",
-    "command.executed",
-    "todo.updated",
-    "busy",
-    "idle",
-    "retry",
-  ];
-  return relevantTypes.includes(event.type);
 }
 
 import { toContainerUrl } from "../../proxy";
@@ -294,28 +273,19 @@ export async function executeTask(
       }
     }
 
-    // Start event bridge
-    const abortController = new AbortController();
-    const eventPromise = (async () => {
-      try {
-        const { stream } = await client!.global.event({
-          signal: abortController.signal,
-        } as any);
-        for await (const event of stream as any) {
-          if (shouldForwardEvent(event)) {
-            // Forward to DO via proxy
-            await publishToRealtime(
-              params.proxyBaseUrl,
-              params.sessionId,
-              event.type,
-              event.properties || event,
-            );
-          }
-        }
-      } catch {
-        // Stop silently on abort or connection error
-      }
-    })();
+    // NOTE: SSE event streaming via client.global.event() doesn't work because
+    // sandbox.containerFetch doesn't properly support streaming responses.
+    // Instead, we publish discrete events at key moments (start, completion).
+    // See: https://github.com/cloudflare/sandbox/issues/XXX
+
+    // Publish task started event
+    await publishToRealtime(params.proxyBaseUrl, params.sessionId, "task.started", {
+      taskId,
+      runId: params.runId,
+      opencodeSessionId,
+      model: params.model,
+      timestamp: new Date().toISOString(),
+    });
 
     // Execute the task with enhanced prompt for better output
     const enhancedTask = enhanceTask(params.task);
@@ -344,10 +314,6 @@ export async function executeTask(
       },
     })) as OpenCodePromptResponse;
 
-    // End event bridge
-    abortController.abort();
-    await eventPromise;
-
     log("executeTask.promptComplete", "Received response from OpenCode", {
       taskId,
       opencodeSessionId,
@@ -370,6 +336,15 @@ export async function executeTask(
         errorName: errorInfo.name,
         errorMessage: errorInfo.data.message,
       });
+      // Publish task failed event
+      await publishToRealtime(params.proxyBaseUrl, params.sessionId, "task.failed", {
+        taskId,
+        runId: params.runId,
+        opencodeSessionId,
+        error: errorInfo.data.message,
+        tokens: response.data.info.tokens,
+        timestamp: new Date().toISOString(),
+      });
       return {
         result: {
           success: false,
@@ -388,6 +363,17 @@ export async function executeTask(
       tokens: response?.data?.info?.tokens,
     });
 
+    // Publish task completed event
+    await publishToRealtime(params.proxyBaseUrl, params.sessionId, "task.completed", {
+      taskId,
+      runId: params.runId,
+      opencodeSessionId,
+      success: true,
+      outputPreview: output.slice(0, 500), // First 500 chars as preview
+      tokens: response?.data?.info?.tokens,
+      timestamp: new Date().toISOString(),
+    });
+
     return {
       result: {
         success: true,
@@ -401,6 +387,20 @@ export async function executeTask(
       taskId,
       existingOpencodeSessionId: params.existingOpencodeSessionId,
     });
+
+    // Publish task failed event (best effort - may fail if proxy is unreachable)
+    try {
+      await publishToRealtime(params.proxyBaseUrl, params.sessionId, "task.failed", {
+        taskId,
+        runId: params.runId,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (publishError) {
+      logError("executeTask.publishError", "Failed to publish error event", publishError, {
+        taskId,
+      });
+    }
 
     // Return a failed result but still need to return some session ID
     // In case of error, we may not have a valid session ID
