@@ -20,5 +20,9 @@
     "tsc",
     "knip",
     "lefthook"
+  ],
+  "ignoreExports": [
+    "src/proxy/services/deploy.ts",
+    "src/workflows/helpers/tools.ts"
   ]
 }

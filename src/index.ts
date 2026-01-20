@@ -291,6 +291,7 @@ const workerFetch = async (
 
       // Handle deployment request with JWT context
       return handleDeployRequest(request, { jwt, env, service: "deploy", request });
+      // oxlint-disable-next-line eslint/no-unused-vars
     } catch (_error) {
       return new Response(JSON.stringify({ error: "Invalid token" }), {
         status: 401,
