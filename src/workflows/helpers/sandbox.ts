@@ -5,6 +5,7 @@ import { UserError } from "@shipbox/shared";
 import { StorageKeys } from "../../storage/keys";
 
 import { configureAnthropic, configureGithub, toContainerUrl } from "../../proxy";
+import { injectCustomTools } from "./tools";
 import { restoreSession } from "./backup";
 import type { WorkflowDeps } from "./types";
 
@@ -147,6 +148,11 @@ export async function ensureSandboxReady(params: SandboxReadyParams): Promise<Sa
     });
     await configureSandboxProxy(sandbox, bucket, sessionId, proxyBaseUrl, proxyToken);
     await setupGitConfig(sandbox, bucket, sessionId);
+
+    // Inject custom tools for OpenCode agent (deploy_pages, deploy_worker, etc.)
+    const containerProxyUrl = toContainerUrl(proxyBaseUrl);
+    await injectCustomTools(sandbox, containerProxyUrl, proxyToken);
+
     result.configuredProxy = true;
   }
 

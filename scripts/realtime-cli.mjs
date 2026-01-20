@@ -185,7 +185,7 @@ function connect(sessionId, token) {
     try {
       const event = JSON.parse(message);
       printEvent(event);
-    } catch (e) {
+    } catch (_e) {
       // Non-JSON message
       console.log(`${timestamp()} ${color('gray', 'raw:')} ${message.slice(0, 100)}`);
     }

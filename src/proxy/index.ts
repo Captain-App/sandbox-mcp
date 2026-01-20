@@ -13,7 +13,14 @@
 export { createProxyHandler } from "./handler";
 
 // Services
-export { anthropic, cloudflare, configureAnthropic, configureGithub, github } from "./services";
+export {
+  anthropic,
+  cloudflare,
+  configureAnthropic,
+  configureGithub,
+  github,
+  handleDeployRequest,
+} from "./services";
 
 // Token (Effect-native)
 export { createProxyToken, verifyProxyTokenAsync } from "./token";

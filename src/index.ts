@@ -17,6 +17,7 @@ import {
   createProxyHandler,
   createProxyToken,
   github,
+  handleDeployRequest,
   toContainerUrl,
   verifyProxyTokenAsync,
 } from "./proxy";
@@ -267,6 +268,34 @@ const workerFetch = async (
         }),
         { status: 404, headers: { "Content-Type": "application/json" } },
       );
+    }
+  }
+
+  // Deploy proxy - special handler for deployment requests from sandbox tools
+  // Must be before generic proxy handler to intercept /proxy/deploy/* paths
+  if (url.pathname.startsWith("/proxy/deploy/")) {
+    // Validate JWT token
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    try {
+      const jwt = await verifyProxyTokenAsync({
+        secret: env.PROXY_JWT_SECRET,
+        token: authHeader.slice(7),
+      });
+
+      // Handle deployment request with JWT context
+      return handleDeployRequest(request, { jwt, env, service: "deploy", request });
+    } catch (_error) {
+      return new Response(JSON.stringify({ error: "Invalid token" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   }
 
