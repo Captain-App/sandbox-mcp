@@ -2,14 +2,14 @@
   "ignore": [
     "scripts/test-deploy-flow.ts",
     "src/index.integration.test.ts",
-    "src/proxy/services/deploy.ts"
+    "src/proxy/services/deploy.ts",
+    "src/workflows/helpers/tools.ts"
   ],
   "ignoreDependencies": [
     "@shipbox/shared",
     "ai",
     "@cloudflare/vitest-pool-workers",
     "wrangler",
-    "lefthook",
     "oxfmt",
     "oxlint",
     "@cloudflare/workers-types",
