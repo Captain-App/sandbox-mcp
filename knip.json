@@ -1,5 +1,9 @@
 {
-  "ignore": ["scripts/test-deploy-flow.ts", "src/index.integration.test.ts"],
+  "ignore": [
+    "scripts/test-deploy-flow.ts",
+    "src/index.integration.test.ts",
+    "src/proxy/services/deploy.ts"
+  ],
   "ignoreDependencies": [
     "@shipbox/shared",
     "ai",
@@ -20,9 +24,5 @@
     "tsc",
     "knip",
     "lefthook"
-  ],
-  "ignoreExports": [
-    "src/proxy/services/deploy.ts",
-    "src/workflows/helpers/tools.ts"
   ]
 }
