@@ -9,17 +9,21 @@ import type { Config, OpencodeClient } from "@opencode-ai/sdk";
 async function publishToRealtime(proxyBaseUrl: string, sessionId: string, type: string, data: any) {
   try {
     const url = `${proxyBaseUrl}/internal/realtime/${sessionId}/publish`;
-    console.log(`[Realtime] Publishing event type=${type} to ${url}`);
+    console.log(`[Realtime] 📤 Publishing event type=${type} to ${url}`, { data });
     const res = await fetch(url, {
       method: "POST",
       body: JSON.stringify({ type, data }),
       headers: { "Content-Type": "application/json" },
     });
     if (!res.ok) {
-      console.error(`[Realtime] Publish failed: ${res.status} ${await res.text()}`);
+      const errorText = await res.text();
+      console.error(`[Realtime] ❌ Publish failed: ${res.status} ${errorText}`);
+    } else {
+      const result = await res.json();
+      console.log(`[Realtime] ✅ Event published successfully`, { result });
     }
   } catch (e) {
-    console.error(`[Realtime] Failed to publish event for ${sessionId}:`, e);
+    console.error(`[Realtime] ❌ Failed to publish event for ${sessionId}:`, e);
   }
 }
 
