@@ -1,0 +1,16 @@
+# Backstage catalog entry — discovered by https://backstage.captainapp.co.uk
+# (captain-k3s GitHub App). Edit freely: type, lifecycle, system, owner, links.
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: sandbox-mcp
+  description: "Remote MCP to run OpenCode on Sandboxes"
+  annotations:
+    github.com/project-slug: Captain-App/sandbox-mcp
+  tags:
+    - fork
+    - typescript
+spec:
+  type: service
+  lifecycle: experimental
+  owner: group:default/captain-app
